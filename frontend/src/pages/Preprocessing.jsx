@@ -414,10 +414,10 @@ export default function Preprocessing() {
               {recipe.steps.length} transformation steps configured
             </span>
             <Link 
-              to="/pipeline"
+              to={`/models?datasetId=${dataset?.id || datasetId}`}
               className="btn btn-primary btn-sm flex items-center gap-1.5"
             >
-              <span>Save & Proceed</span>
+              <span>Save & Proceed to Models</span>
               <ArrowRight size={14} />
             </Link>
           </div>

@@ -3,6 +3,9 @@ import Navbar from "./components/Navbar";
 import Upload from "./pages/Upload";
 import DatasetView from "./pages/DatasetView";
 import Preprocessing from "./pages/Preprocessing";
+import ModelConfig from "./pages/ModelConfig";
+import RunExperiment from "./pages/RunExperiment";
+import ExperimentList from "./pages/ExperimentList";
 import Pipeline from "./pages/Pipeline";
 import Dashboard from "./pages/Dashboard";
 import "./App.css";
@@ -18,6 +21,9 @@ export default function App() {
             <Route path="/upload" element={<Upload />} />
             <Route path="/dataset/:id" element={<DatasetView />} />
             <Route path="/preprocessing" element={<Preprocessing />} />
+            <Route path="/models" element={<ModelConfig />} />
+            <Route path="/experiments/run" element={<RunExperiment />} />
+            <Route path="/experiments" element={<ExperimentList />} />
             <Route path="/pipeline" element={<Pipeline />} />
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="*" element={<Navigate to="/upload" replace />} />
