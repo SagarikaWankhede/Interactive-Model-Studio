@@ -1,54 +1,25 @@
-import { useEffect, useState } from "react";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import Navbar from "./components/Navbar";
+import Upload from "./pages/Upload";
+import Pipeline from "./pages/Pipeline";
+import Dashboard from "./pages/Dashboard";
 import "./App.css";
 
-function App() {
-  const [message, setMessage] = useState("Connecting to backend...");
-  const [status, setStatus] = useState("checking");
-
-  useEffect(() => {
-    fetch("http://127.0.0.1:8000/")
-      .then((response) => {
-        if (!response.ok) {
-          throw new Error("Backend returned an error");
-        }
-
-        return response.json();
-      })
-      .then((data) => {
-        setMessage(data.message);
-        setStatus("connected");
-      })
-      .catch((error) => {
-        console.error("Backend connection error:", error);
-        setMessage("Could not connect to backend");
-        setStatus("error");
-      });
-  }, []);
-
+export default function App() {
   return (
-    <div className="app">
-      <header className="header">
-        <h1>Interactive Model Studio</h1>
-        <p>Visual machine learning platform</p>
-      </header>
-
-      <main className="main">
-        <div className="welcome-card">
-          <h2>Frontend ↔ Backend Test</h2>
-
-          <div className={`status ${status}`}>
-            {status === "connected"
-              ? "✓ Connected"
-              : status === "error"
-              ? "✗ Error"
-              : "⟳ Checking..."}
-          </div>
-
-          <p>{message}</p>
-        </div>
-      </main>
-    </div>
+    <BrowserRouter>
+      <div className="app-shell">
+        <Navbar />
+        <main className="main-content">
+          <Routes>
+            <Route path="/" element={<Navigate to="/upload" replace />} />
+            <Route path="/upload" element={<Upload />} />
+            <Route path="/pipeline" element={<Pipeline />} />
+            <Route path="/dashboard" element={<Dashboard />} />
+            <Route path="*" element={<Navigate to="/upload" replace />} />
+          </Routes>
+        </main>
+      </div>
+    </BrowserRouter>
   );
 }
-
-export default App;
