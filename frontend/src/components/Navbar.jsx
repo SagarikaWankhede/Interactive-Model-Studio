@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { NavLink } from "react-router-dom";
 import { 
   Database, 
+  Sliders,
   Workflow, 
   BarChart3, 
   CheckCircle2, 
@@ -52,21 +53,28 @@ export default function Navbar() {
             to="/upload" 
             className={({ isActive }) => `nav-link ${isActive ? "active" : ""}`}
           >
-            <Database size={17} />
+            <Database size={16} />
             <span>Datasets</span>
+          </NavLink>
+          <NavLink 
+            to="/preprocessing" 
+            className={({ isActive }) => `nav-link ${isActive ? "active" : ""}`}
+          >
+            <Sliders size={16} />
+            <span>Recipe Builder</span>
           </NavLink>
           <NavLink 
             to="/pipeline" 
             className={({ isActive }) => `nav-link ${isActive ? "active" : ""}`}
           >
-            <Workflow size={17} />
-            <span>Pipeline Studio</span>
+            <Workflow size={16} />
+            <span>Model Studio</span>
           </NavLink>
           <NavLink 
             to="/dashboard" 
             className={({ isActive }) => `nav-link ${isActive ? "active" : ""}`}
           >
-            <BarChart3 size={17} />
+            <BarChart3 size={16} />
             <span>Dashboard</span>
           </NavLink>
         </nav>
