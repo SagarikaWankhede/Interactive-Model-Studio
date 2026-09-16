@@ -1,6 +1,6 @@
 /**
- * Fallback / Mock Datasets for Phase 1 Data Layer.
- * Allows Person C's UI to function standalone while Person A and Person B build backend services.
+ * Fallback / Mock Data for Interactive ML Model Studio.
+ * Supports standalone testing of Phase 1 (Data Layer) and Phase 2 (Experiment Engine).
  */
 
 export const mockDatasets = [
@@ -100,4 +100,191 @@ export const mockDatasets = [
 
 export function getMockDatasetById(id) {
   return mockDatasets.find((d) => d.id === id) || mockDatasets[0];
+}
+
+/**
+ * Supported ML Algorithms and their dynamic hyperparameter schemas.
+ */
+export const supportedAlgorithms = [
+  {
+    id: "RandomForest",
+    name: "Random Forest Classifier",
+    category: "Ensemble",
+    description: "Robust ensemble of decision trees. Excellent generalist model resistant to overfitting.",
+    defaultHyperparams: {
+      n_estimators: 100,
+      max_depth: 12,
+      min_samples_split: 2,
+      criterion: "gini",
+    },
+    paramSchema: [
+      { name: "n_estimators", label: "Number of Trees", type: "number", min: 10, max: 500, step: 10 },
+      { name: "max_depth", label: "Max Depth", type: "number", min: 1, max: 50, step: 1 },
+      { name: "min_samples_split", label: "Min Samples to Split", type: "number", min: 2, max: 20, step: 1 },
+      { name: "criterion", label: "Split Criterion", type: "select", options: ["gini", "entropy", "log_loss"] },
+    ],
+  },
+  {
+    id: "XGBoost",
+    name: "XGBoost Classifier",
+    category: "Gradient Boosting",
+    description: "High-performance gradient boosted decision trees. Often yields top leaderboard accuracy.",
+    defaultHyperparams: {
+      n_estimators: 150,
+      learning_rate: 0.08,
+      max_depth: 6,
+      subsample: 0.8,
+    },
+    paramSchema: [
+      { name: "n_estimators", label: "Boosting Rounds", type: "number", min: 20, max: 1000, step: 10 },
+      { name: "learning_rate", label: "Learning Rate (eta)", type: "number", min: 0.01, max: 0.5, step: 0.01 },
+      { name: "max_depth", label: "Max Tree Depth", type: "number", min: 2, max: 15, step: 1 },
+      { name: "subsample", label: "Subsample Ratio", type: "number", min: 0.5, max: 1.0, step: 0.05 },
+    ],
+  },
+  {
+    id: "LogisticRegression",
+    name: "Logistic Regression",
+    category: "Linear Models",
+    description: "Fast, interpretable linear classification with L1/L2 regularization.",
+    defaultHyperparams: {
+      C: 1.0,
+      penalty: "l2",
+      max_iter: 200,
+      solver: "lbfgs",
+    },
+    paramSchema: [
+      { name: "C", label: "Inverse Regularization (C)", type: "number", min: 0.01, max: 100.0, step: 0.1 },
+      { name: "penalty", label: "Penalty Regularization", type: "select", options: ["l2", "none"] },
+      { name: "max_iter", label: "Maximum Iterations", type: "number", min: 50, max: 1000, step: 50 },
+      { name: "solver", label: "Optimization Solver", type: "select", options: ["lbfgs", "saga", "newton-cg"] },
+    ],
+  },
+  {
+    id: "DecisionTree",
+    name: "Decision Tree Classifier",
+    category: "Trees",
+    description: "Single decision tree offering maximum explainability and rapid training time.",
+    defaultHyperparams: {
+      max_depth: 8,
+      min_samples_split: 5,
+      criterion: "gini",
+    },
+    paramSchema: [
+      { name: "max_depth", label: "Max Depth", type: "number", min: 2, max: 30, step: 1 },
+      { name: "min_samples_split", label: "Min Samples Split", type: "number", min: 2, max: 20, step: 1 },
+      { name: "criterion", label: "Split Criterion", type: "select", options: ["gini", "entropy"] },
+    ],
+  },
+];
+
+/**
+ * Initial Experiment Runs History for Phase 2.
+ */
+export let mockExperiments = [
+  {
+    id: "exp-run-001",
+    dataset_id: "ds-churn-001",
+    dataset_name: "customer_churn.csv",
+    model_name: "XGBoost Classifier",
+    model_type: "XGBoost",
+    status: "completed",
+    train_time: 1.94,
+    created_at: "2026-09-16T08:45:00Z",
+    metrics: {
+      accuracy: 0.958,
+      f1_score: 0.949,
+      precision: 0.952,
+      recall: 0.946,
+      roc_auc: 0.984,
+    },
+    hyperparams: {
+      n_estimators: 150,
+      learning_rate: 0.08,
+      max_depth: 6,
+      subsample: 0.8,
+    },
+    confusion_matrix: [
+      [972, 45],
+      [58, 334]
+    ],
+    feature_importances: [
+      { feature: "ContractType", importance: 0.34 },
+      { feature: "MonthlyCharges", importance: 0.26 },
+      { feature: "TenureMonths", importance: 0.22 },
+      { feature: "InternetService", importance: 0.12 },
+      { feature: "PaymentMethod", importance: 0.06 },
+    ],
+  },
+  {
+    id: "exp-run-002",
+    dataset_id: "ds-churn-001",
+    dataset_name: "customer_churn.csv",
+    model_name: "Random Forest Classifier",
+    model_type: "RandomForest",
+    status: "completed",
+    train_time: 1.45,
+    created_at: "2026-09-16T08:50:00Z",
+    metrics: {
+      accuracy: 0.938,
+      f1_score: 0.929,
+      precision: 0.931,
+      recall: 0.927,
+      roc_auc: 0.967,
+    },
+    hyperparams: {
+      n_estimators: 100,
+      max_depth: 12,
+      min_samples_split: 2,
+      criterion: "gini",
+    },
+    confusion_matrix: [
+      [950, 67],
+      [73, 319]
+    ],
+    feature_importances: [
+      { feature: "TenureMonths", importance: 0.31 },
+      { feature: "MonthlyCharges", importance: 0.29 },
+      { feature: "ContractType", importance: 0.24 },
+      { feature: "TotalCharges", importance: 0.11 },
+      { feature: "PaymentMethod", importance: 0.05 },
+    ],
+  },
+  {
+    id: "exp-run-003",
+    dataset_id: "ds-churn-001",
+    dataset_name: "customer_churn.csv",
+    model_name: "Logistic Regression",
+    model_type: "LogisticRegression",
+    status: "completed",
+    train_time: 0.38,
+    created_at: "2026-09-16T08:55:00Z",
+    metrics: {
+      accuracy: 0.825,
+      f1_score: 0.812,
+      precision: 0.819,
+      recall: 0.806,
+      roc_auc: 0.883,
+    },
+    hyperparams: {
+      C: 1.0,
+      penalty: "l2",
+      max_iter: 200,
+      solver: "lbfgs",
+    },
+    confusion_matrix: [
+      [875, 142],
+      [104, 288]
+    ],
+    feature_importances: [
+      { feature: "MonthlyCharges", importance: 0.42 },
+      { feature: "ContractType", importance: 0.35 },
+      { feature: "TenureMonths", importance: 0.23 },
+    ],
+  },
+];
+
+export function addMockExperiment(exp) {
+  mockExperiments = [exp, ...mockExperiments];
+  return exp;
 }
