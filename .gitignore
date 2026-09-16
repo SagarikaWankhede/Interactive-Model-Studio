@@ -1,0 +1,35 @@
+# Virtual Environment & Python cache
+venv/
+backend/venv/
+backend/__pycache__/
+**/__pycache__/
+*.py[cod]
+*$py.class
+
+# Database & Model Artifact Storage
+backend/data.db
+backend/storage/
+*.joblib
+*.pkl
+*.sqlite
+
+# Node / Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/dist-ssr/
+*.local
+
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# Editor & OS files
+.vscode/
+.idea/
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
