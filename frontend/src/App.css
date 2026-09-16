@@ -926,3 +926,267 @@ body {
 .animate-spin {
   animation: spin 1s linear infinite;
 }
+
+/* ===================================
+   PHASE 3 — Dashboard & Charts
+   =================================== */
+
+/* Compare select pills */
+.compare-select-pill {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.4rem 0.85rem;
+  border: 1px solid var(--border-color);
+  border-radius: 9999px;
+  background: white;
+  font-size: 0.82rem;
+  cursor: pointer;
+  transition: all 0.15s;
+  color: var(--text-muted);
+}
+
+.compare-select-pill:hover {
+  border-color: #a5b4fc;
+  background-color: #f5f3ff;
+}
+
+.compare-select-pill.active {
+  border-color: var(--primary);
+  background-color: #eef2ff;
+  color: var(--text-main);
+}
+
+/* Dashboard Tabs */
+.tab-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.5rem 1rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.15s;
+  margin-bottom: -2px;
+}
+
+.tab-btn:hover {
+  color: var(--text-main);
+}
+
+.tab-btn.active {
+  color: var(--primary);
+  border-bottom-color: var(--primary);
+}
+
+/* Best Model Badges */
+.best-model-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.15rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.badge-winner-emerald {
+  background-color: #d1fae5;
+  color: #065f46;
+}
+
+.badge-winner-indigo {
+  background-color: #e0e7ff;
+  color: #3730a3;
+}
+
+.badge-winner-cyan {
+  background-color: #cffafe;
+  color: #164e63;
+}
+
+.badge-winner-gold {
+  background-color: #fef3c7;
+  color: #92400e;
+}
+
+.badge-icon {
+  flex-shrink: 0;
+}
+
+/* Confusion Matrix Heatmap */
+.confusion-matrices-container {
+  padding: 0.5rem 0;
+}
+
+.matrix-card {
+  background: #f8fafc;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  padding: 1.25rem;
+}
+
+.matrix-header {
+  margin-bottom: 1rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.matrix-grid-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.matrix-axis-y {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+}
+
+.axis-label-vertical {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  writing-mode: vertical-lr;
+  transform: rotate(180deg);
+}
+
+.matrix-content {
+  flex: 1;
+}
+
+.matrix-axis-x {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.4rem;
+  margin-left: 52px;
+  margin-bottom: 0.35rem;
+}
+
+.axis-label {
+  text-align: center;
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.matrix-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.matrix-row {
+  display: grid;
+  grid-template-columns: 50px 1fr 1fr;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+.row-label {
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-align: right;
+  padding-right: 0.25rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.matrix-cell {
+  border-radius: 6px;
+  padding: 0.6rem 0.5rem;
+  text-align: center;
+  transition: transform 0.1s ease;
+}
+
+.matrix-cell:hover {
+  transform: scale(1.02);
+}
+
+.cell-type {
+  display: block;
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: rgba(0,0,0,0.55);
+  margin-bottom: 0.2rem;
+}
+
+.cell-val {
+  display: block;
+  font-size: 1.1rem;
+  font-weight: 800;
+  color: #0f172a;
+  line-height: 1.2;
+}
+
+.cell-pct {
+  display: block;
+  font-size: 0.72rem;
+  color: rgba(0,0,0,0.5);
+  font-weight: 600;
+}
+
+.matrix-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border-color);
+}
+
+/* Feature importance chart */
+.feature-importance-container {
+  padding: 0.5rem 0;
+}
+
+/* Grid utilities for Phase 3 */
+.grid { display: grid; }
+.grid-cols-1 { grid-template-columns: repeat(1, minmax(0, 1fr)); }
+.grid-cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.grid-cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.grid-cols-5 { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.px-6 { padding-left: 1.5rem; padding-right: 1.5rem; }
+.px-8 { padding-left: 2rem; padding-right: 2rem; }
+.py-2\.5 { padding-top: 0.625rem; padding-bottom: 0.625rem; }
+.py-3 { padding-top: 0.75rem; padding-bottom: 0.75rem; }
+.py-4 { padding-top: 1rem; padding-bottom: 1rem; }
+.py-10 { padding-top: 2.5rem; padding-bottom: 2.5rem; }
+.py-12 { padding-top: 3rem; padding-bottom: 3rem; }
+.py-20 { padding-top: 5rem; padding-bottom: 5rem; }
+.p-3 { padding: 0.75rem; }
+.p-4 { padding: 1rem; }
+.border-t { border-top: 1px solid var(--border-color); }
+.border-b { border-bottom: 1px solid var(--border-color); }
+.pb-2 { padding-bottom: 0.5rem; }
+.pt-4 { padding-top: 1rem; }
+.pt-6 { padding-top: 1.5rem; }
+.rounded-lg { border-radius: 0.5rem; }
+.mx-auto { margin-left: auto; margin-right: auto; }
+.ml-1\.5 { margin-left: 0.375rem; }
+.block { display: block; }
+.hover\:text-primary:hover { color: var(--primary); }
+
+@media (min-width: 768px) {
+  .md\:grid-cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .md\:grid-cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .md\:grid-cols-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .md\:grid-cols-5 { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+}
+
+@media (min-width: 1024px) {
+  .lg\:grid-cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .min-w-\[280px\] { min-width: 280px; }
+}

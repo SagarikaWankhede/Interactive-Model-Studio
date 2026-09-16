@@ -6,6 +6,7 @@ import Preprocessing from "./pages/Preprocessing";
 import ModelConfig from "./pages/ModelConfig";
 import RunExperiment from "./pages/RunExperiment";
 import ExperimentList from "./pages/ExperimentList";
+import RestoreExperiment from "./pages/RestoreExperiment";
 import Pipeline from "./pages/Pipeline";
 import Dashboard from "./pages/Dashboard";
 import "./App.css";
@@ -24,6 +25,7 @@ export default function App() {
             <Route path="/models" element={<ModelConfig />} />
             <Route path="/experiments/run" element={<RunExperiment />} />
             <Route path="/experiments" element={<ExperimentList />} />
+            <Route path="/restore/:id" element={<RestoreExperiment />} />
             <Route path="/pipeline" element={<Pipeline />} />
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="*" element={<Navigate to="/upload" replace />} />
