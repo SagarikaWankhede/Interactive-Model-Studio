@@ -2,6 +2,8 @@
 Recipe Runner Module
 Executes an ordered list of preprocessing steps deterministically on a dataset.
 Prevents data leakage by fitting transformers exclusively on the training split.
+Supports all core and advanced transforms (imputation, encoding, scaling,
+power transforms, binning, polynomial features, PCA, outlier clipping, datetime decomposition).
 """
 
 from typing import Any, Dict, List, Optional, Tuple
@@ -12,23 +14,17 @@ from ml_engine.preprocessing import (
     apply_imputation,
     apply_scaling,
     apply_encoding,
-Sequential deterministic preprocessing recipe executor.
-Processes data transformations step-by-step without data leakage.
-"""
-
-import pandas as pd
-from typing import List, Dict, Any, Tuple
-from .preprocessing import (
-    apply_imputation,
-    apply_encoding,
-    apply_scaling,
-    apply_train_test_split,
+    apply_power_transform,
+    apply_binning,
+    apply_polynomial_features,
+    apply_pca,
+    apply_outlier_clipping,
+    apply_datetime_decomposition,
 )
 
 
 def run_recipe(
     df: pd.DataFrame,
-<<<<<<< HEAD
     target_column: str,
     recipe: List[Dict[str, Any]],
 ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.Series, pd.Series, List[Dict[str, Any]]]:
@@ -82,7 +78,8 @@ def run_recipe(
     for step_cfg in feature_steps:
         step_name = step_cfg.get("step", "").lower()
         params = step_cfg.get("params", {})
-        columns = params.get("columns", [])
+        # Support both 'columns' in params and top-level 'columns'
+        columns = params.get("columns", step_cfg.get("columns", []))
 
         if not columns:
             continue
@@ -125,6 +122,89 @@ def run_recipe(
                 "transformer": transformer,
             })
 
+        elif step_name in ["power", "power_transform"]:
+            method = params.get("method", "yeo-johnson")
+            standardize = params.get("standardize", True)
+            X_train, X_test, transformer = apply_power_transform(
+                X_train, X_test, columns=columns, method=method, standardize=standardize
+            )
+            fitted_transformers.append({
+                "step": "power_transform",
+                "columns": columns,
+                "method": method,
+                "transformer": transformer,
+            })
+
+        elif step_name in ["bin", "discretize"]:
+            n_bins = int(params.get("n_bins", 5))
+            strategy = params.get("strategy", "quantile")
+            encode = params.get("encode", "ordinal")
+            X_train, X_test, transformer = apply_binning(
+                X_train, X_test, columns=columns, n_bins=n_bins, strategy=strategy, encode=encode
+            )
+            fitted_transformers.append({
+                "step": "bin",
+                "columns": columns,
+                "n_bins": n_bins,
+                "strategy": strategy,
+                "transformer": transformer,
+            })
+
+        elif step_name in ["polynomial", "poly"]:
+            degree = int(params.get("degree", 2))
+            interaction_only = bool(params.get("interaction_only", False))
+            include_bias = bool(params.get("include_bias", False))
+            X_train, X_test, transformer = apply_polynomial_features(
+                X_train, X_test, columns=columns, degree=degree,
+                interaction_only=interaction_only, include_bias=include_bias
+            )
+            fitted_transformers.append({
+                "step": "polynomial",
+                "columns": columns,
+                "degree": degree,
+                "transformer": transformer,
+            })
+
+        elif step_name == "pca":
+            n_components = int(params.get("n_components", 2))
+            X_train, X_test, transformer = apply_pca(
+                X_train, X_test, columns=columns, n_components=n_components
+            )
+            fitted_transformers.append({
+                "step": "pca",
+                "columns": columns,
+                "n_components": n_components,
+                "transformer": transformer,
+            })
+
+        elif step_name in ["outlier_clip", "clip"]:
+            method = params.get("method", "iqr")
+            factor = float(params.get("factor", 1.5))
+            lower_q = float(params.get("lower_quantile", 0.01))
+            upper_q = float(params.get("upper_quantile", 0.99))
+            X_train, X_test, thresholds = apply_outlier_clipping(
+                X_train, X_test, columns=columns, method=method,
+                factor=factor, lower_quantile=lower_q, upper_quantile=upper_q
+            )
+            fitted_transformers.append({
+                "step": "outlier_clip",
+                "columns": columns,
+                "method": method,
+                "thresholds": thresholds,
+            })
+
+        elif step_name in ["datetime", "datetime_features"]:
+            components = tuple(params.get("components", ["year", "month", "day", "dayofweek", "is_weekend"]))
+            X_train, X_test, transformer = apply_datetime_decomposition(
+                X_train, X_test, columns=columns, components=components
+            )
+            fitted_transformers.append({
+                "step": "datetime",
+                "columns": columns,
+                "components": components,
+                "transformer": transformer,
+            })
+
         else:
             raise ValueError(f"Unknown or unsupported preprocessing step: '{step_name}'")
 
@@ -139,65 +219,3 @@ def run_recipe(
         y_test.reset_index(drop=True),
         fitted_transformers,
     )
-=======
-    recipe: List[Dict[str, Any]],
-    target_col: str
-) -> Tuple[pd.DataFrame, pd.DataFrame, pd.Series, pd.Series, List[Any]]:
-    """
-    Executes a list of preprocessing recipe steps on input DataFrame.
-
-    Example recipe format:
-    [
-        {"step": "impute", "columns": ["age"], "params": {"strategy": "mean"}},
-        {"step": "encode", "columns": ["gender"], "params": {"method": "onehot"}},
-        {"step": "scale", "columns": ["age"], "params": {"method": "standard"}},
-        {"step": "split", "params": {"test_size": 0.2, "random_state": 42}}
-    ]
-    """
-    processed_df = df.copy()
-    fitted_transformers = []
-    split_params = {"test_size": 0.2, "random_state": 42, "stratify": False}
-
-    for step_config in recipe:
-        step_type = step_config.get("step")
-        cols = step_config.get("columns", [])
-        params = step_config.get("params", {})
-
-        # Exclude target column from transformations if included accidentally
-        cols = [c for c in cols if c != target_col]
-
-        if step_type == "impute":
-            strategy = params.get("strategy", "mean")
-            fill_val = params.get("fill_value", None)
-            processed_df, imputer = apply_imputation(processed_df, cols, strategy, fill_val)
-            if imputer:
-                fitted_transformers.append({"step": "impute", "transformer": imputer, "columns": cols})
-
-        elif step_type == "encode":
-            method = params.get("method", "onehot")
-            processed_df, encoder = apply_encoding(processed_df, cols, method)
-            if encoder:
-                fitted_transformers.append({"step": "encode", "transformer": encoder, "columns": cols})
-
-        elif step_type == "scale":
-            method = params.get("method", "standard")
-            processed_df, scaler = apply_scaling(processed_df, cols, method)
-            if scaler:
-                fitted_transformers.append({"step": "scale", "transformer": scaler, "columns": cols})
-
-        elif step_type == "split":
-            split_params.update(params)
-
-        else:
-            raise ValueError(f"Unknown recipe step type: '{step_type}'")
-
-    X_train, X_test, y_train, y_test = apply_train_test_split(
-        processed_df,
-        target_col=target_col,
-        test_size=split_params.get("test_size", 0.2),
-        random_state=split_params.get("random_state", 42),
-        stratify=split_params.get("stratify", False)
-    )
-
-    return X_train, X_test, y_train, y_test, fitted_transformers
->>>>>>> origin/main
