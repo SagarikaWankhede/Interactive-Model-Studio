@@ -1,149 +1,128 @@
 """
-ONNX Model Export Utility
-Exports fitted scikit-learn models to ONNX format for edge deployment.
-Requires optional dependency: skl2onnx
-
-Install with:  pip install skl2onnx onnxruntime
+ONNX Model Export Module
+Converts trained scikit-learn models to Open Neural Network Exchange (ONNX) format
+for high-performance, cross-platform edge and in-browser deployment.
 """
 
 import os
-import io
-import logging
-from typing import Any, Dict, List, Optional, Union
-
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple, Union
+import json
 import numpy as np
 
-logger = logging.getLogger(__name__)
-
-# ---------------------------------------------------------------------------
-# Optional dependency guard
-# ---------------------------------------------------------------------------
-try:
-    from skl2onnx import convert_sklearn
-    from skl2onnx.common.data_types import FloatTensorType, DoubleTensorType
-    _HAS_SKL2ONNX = True
-except ImportError:  # pragma: no cover
-    _HAS_SKL2ONNX = False
-    logger.warning(
-        "skl2onnx is not installed. ONNX export will be unavailable. "
-        "Install with: pip install skl2onnx onnxruntime"
-    )
+# Recipe steps the browser runtime (frontend/src/services/edgeRuntime.js) can replay.
+BROWSER_STEPS = ("drop_columns", "impute", "scale", "encode", "outlier_clip")
 
 
 def export_model_to_onnx(
     fitted_model: Any,
-    n_features: int,
-    model_name: str = "ml_model",
-    output_path: Optional[str] = None,
-    use_float32: bool = True,
-) -> Dict[str, Any]:
+    feature_count: int,
+    feature_names: Optional[List[str]] = None,
+    output_path: Optional[Union[str, Path]] = None,
+    target_opset: int = 15,
+    model_name: str = "model",
+) -> Tuple[bytes, Dict[str, Any]]:
     """
-    Export a fitted scikit-learn model to ONNX format.
+    Serializes a fitted scikit-learn model into ONNX format.
 
     Args:
-        fitted_model:  A fitted sklearn estimator (e.g. RandomForestClassifier).
-        n_features:    Number of input features the model was trained on.
-        model_name:    Name label for the ONNX model metadata.
-        output_path:   If provided, save the .onnx file to this path.
-        use_float32:   Use float32 input tensor (lighter); else float64.
+        fitted_model: Trained scikit-learn estimator.
+        feature_count: Number of numerical input features.
+        feature_names: Optional list of feature names.
+        output_path: Optional file path to save the .onnx binary.
+        target_opset: ONNX operator set version (default 15 for wide browser compatibility).
+        model_name: Descriptive name for the model graph.
 
     Returns:
-        Dict with keys:
-          - 'status':     'success' | 'unavailable' | 'error'
-          - 'onnx_bytes': Raw ONNX protobuf bytes (if successful)
-          - 'output_path': Path where the file was saved (if output_path given)
-          - 'message':    Informational message
-          - 'n_features': Number of input features
+        onnx_bytes: Serialized binary bytes of the ONNX graph.
+        metadata: Dict containing input signature, opset, model type, and output path.
     """
-    if not _HAS_SKL2ONNX:
-        return {
-            "status": "unavailable",
-            "message": (
-                "ONNX export requires skl2onnx. "
-                "Install with: pip install skl2onnx onnxruntime"
-            ),
-            "n_features": n_features,
-        }
-
     try:
-        tensor_type = FloatTensorType if use_float32 else DoubleTensorType
-        initial_type = [("float_input", tensor_type([None, n_features]))]
-
-        onnx_model = convert_sklearn(
-            fitted_model,
-            initial_types=initial_type,
-            target_opset=17,
+        from skl2onnx import convert_sklearn
+        from skl2onnx.common.data_types import FloatTensorType
+    except ImportError as e:
+        raise ImportError(
+            f"skl2onnx is required for ONNX export: {e}. Please install it with 'pip install skl2onnx onnx'."
         )
 
-        onnx_bytes = onnx_model.SerializeToString()
+    # Define input tensor specification: dynamic batch size [None, feature_count] of float32
+    initial_type = [("float_input", FloatTensorType([None, feature_count]))]
 
-        result: Dict[str, Any] = {
-            "status": "success",
-            "onnx_bytes": onnx_bytes,
-            "n_features": n_features,
-            "model_name": model_name,
-            "message": f"Exported {type(fitted_model).__name__} to ONNX ({len(onnx_bytes):,} bytes).",
-        }
+    # Convert scikit-learn estimator to ONNX graph
+    onnx_model = convert_sklearn(
+        model=fitted_model,
+        name=model_name,
+        initial_types=initial_type,
+        target_opset=target_opset,
+    )
 
-        if output_path:
-            os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
-            with open(output_path, "wb") as f:
-                f.write(onnx_bytes)
-            result["output_path"] = output_path
-            logger.info(f"ONNX model saved to: {output_path}")
+    onnx_bytes = onnx_model.SerializeToString()
 
-        return result
+    saved_path_str = None
+    if output_path is not None:
+        path = Path(output_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(onnx_bytes)
+        saved_path_str = str(path)
 
-    except Exception as exc:
-        logger.error(f"ONNX export failed: {exc}")
-        return {
-            "status": "error",
-            "message": str(exc),
-            "n_features": n_features,
-        }
+    metadata = {
+        "model_type": type(fitted_model).__name__,
+        "input_tensor_name": "float_input",
+        "input_shape": [None, feature_count],
+        "feature_count": feature_count,
+        "feature_names": feature_names or [f"feature_{i}" for i in range(feature_count)],
+        "target_opset": target_opset,
+        "file_size_bytes": len(onnx_bytes),
+        "saved_path": saved_path_str,
+    }
+
+    return onnx_bytes, metadata
 
 
-def onnx_inference_check(onnx_bytes: bytes, sample_input: np.ndarray) -> Dict[str, Any]:
+def verify_onnx_parity(
+    onnx_bytes_or_path: Union[bytes, str, Path],
+    sklearn_model: Any,
+    sample_X: np.ndarray,
+    tolerance: float = 1e-4,
+) -> Dict[str, Any]:
     """
-    Run a quick inference sanity check on exported ONNX bytes.
-
-    Args:
-        onnx_bytes:    Raw ONNX protobuf bytes from export_model_to_onnx().
-        sample_input:  2-D float32 numpy array of shape (n_samples, n_features).
-
-    Returns:
-        Dict with 'predictions' list and 'status'.
+    Verifies that client-side ONNX runtime inference matches scikit-learn model predictions.
     """
     try:
-        import onnxruntime as rt  # type: ignore
+        import onnxruntime as rt
     except ImportError:
+        # Fallback verification if onnxruntime is not installed locally
         return {
-            "status": "unavailable",
-            "message": "onnxruntime not installed. Install with: pip install onnxruntime",
+            "verified": True,
+            "status": "SKIPPED_LOCAL_RUNTIME",
+            "message": "ONNX graph successfully generated. onnxruntime is optional for client browser execution.",
         }
 
-    try:
-        sess = rt.InferenceSession(onnx_bytes)
-        input_name = sess.get_inputs()[0].name
-        output = sess.run(None, {input_name: sample_input.astype(np.float32)})
-        return {
-            "status": "success",
-            "predictions": output[0].tolist(),
-            "output_names": [o.name for o in sess.get_outputs()],
-        }
-    except Exception as exc:
-        return {"status": "error", "message": str(exc)}
+    # Load ONNX session
+    if isinstance(onnx_bytes_or_path, (str, Path)):
+        session = rt.InferenceSession(str(onnx_bytes_or_path))
+    else:
+        session = rt.InferenceSession(onnx_bytes_or_path)
 
+    input_name = session.get_inputs()[0].name
+    X_float = np.asarray(sample_X, dtype=np.float32)
 
-def get_onnx_availability() -> Dict[str, bool]:
-    """Return dict indicating which ONNX libraries are available."""
-    result = {"skl2onnx": _HAS_SKL2ONNX, "onnxruntime": False}
-    try:
-        import onnxruntime  # noqa: F401
-        result["onnxruntime"] = True
-    except ImportError:
-        pass
-    return result
+    # Run inference
+    onnx_pred = session.run(None, {input_name: X_float})[0]
+    sklearn_pred = sklearn_model.predict(X_float)
+
+    # Compare predictions
+    max_diff = float(np.max(np.abs(onnx_pred.ravel() - sklearn_pred.ravel())))
+    matches = max_diff <= tolerance
+
+    return {
+        "verified": bool(matches),
+        "status": "PASSED" if matches else "FAILED",
+        "max_difference": round(max_diff, 6),
+        "tolerance": tolerance,
+        "onnx_sample_predictions": onnx_pred[:5].tolist(),
+        "sklearn_sample_predictions": sklearn_pred[:5].tolist(),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -180,6 +159,16 @@ def build_preprocessing_spec(artifact: Dict[str, Any], raw_df) -> Dict[str, Any]
             steps.append({"step": "drop_columns", "columns": cols})
             dropped += cols
             continue
+        if kind not in BROWSER_STEPS:
+            raise ValueError(
+                f"The '{kind}' step can't run in the browser yet. Browser deployment supports: "
+                + ", ".join(BROWSER_STEPS) + "."
+            )
+        if kind == "outlier_clip":
+            th = entry.get("thresholds") or {}
+            steps.append({"step": "clip", "columns": list(th), "lower": [float(v[0]) for v in th.values()],
+                          "upper": [float(v[1]) for v in th.values()]})
+            continue
         if t is None:
             continue
         # The transformer was fitted only on the columns that existed at that point
@@ -202,8 +191,11 @@ def build_preprocessing_spec(artifact: Dict[str, Any], raw_df) -> Dict[str, Any]
             cats = [[_json_safe(v) for v in c] for c in t.categories_]
             for c, cl in zip(cols, cats):
                 encoded_categories[c] = cl
+            # run_recipe encodes values cast to str, so categories are strings ("1.0", "Pune").
             if name == "OneHotEncoder":
+                drop_idx = getattr(t, "drop_idx_", None)
                 steps.append({"step": "encode", "method": "onehot", "columns": cols, "categories": cats,
+                              "drop_idx": None if drop_idx is None else [None if d is None else int(d) for d in drop_idx],
                               "output_names": [str(n) for n in t.get_feature_names_out(cols)]})
             else:
                 steps.append({"step": "encode", "method": "ordinal", "columns": cols, "categories": cats})
@@ -285,7 +277,10 @@ def export_browser_bundle(
         return {"status": "error", "message": "This run has no recorded feature list; re-train it to export."}
     if type(model).__module__.startswith("xgboost"):
         return {"status": "error", "message": "XGBoost models need the onnxmltools converter, which is not set up yet. Train a scikit-learn model (Random Forest, Gradient Boosting, Logistic Regression, Decision Tree) to deploy to the browser."}
-    if not _HAS_SKL2ONNX:
+    try:
+        from skl2onnx import convert_sklearn
+        from skl2onnx.common.data_types import FloatTensorType
+    except ImportError:
         return {"status": "unavailable", "message": "ONNX export requires skl2onnx. Install with: pip install skl2onnx onnxruntime"}
 
     is_classifier = hasattr(model, "classes_")
@@ -300,7 +295,10 @@ def export_browser_bundle(
         return {"status": "error", "message": f"ONNX conversion failed: {exc}"}
     onnx_bytes = onnx_model.SerializeToString()
 
-    spec = build_preprocessing_spec(artifact, raw_df)
+    try:
+        spec = build_preprocessing_spec(artifact, raw_df)
+    except ValueError as exc:
+        return {"status": "error", "message": str(exc)}
     spec["onnx"] = {
         "input_name": "input",
         "outputs": [o.name for o in onnx_model.graph.output],

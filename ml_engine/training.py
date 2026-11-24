@@ -1,39 +1,56 @@
 """
-Model initialization, training, and execution time profiling.
+Training Module
+Instantiates and fits machine learning models, tracking precise training execution times.
+Supports both classification and regression algorithms from scikit-learn and XGBoost.
 """
 
 import time
+from typing import Any, Dict, Optional, Tuple
 import pandas as pd
-from typing import Dict, Any, Tuple, Optional
-from .registry import get_model_class
+
+from ml_engine.registry import MODEL_METADATA, get_model_class, get_model_defaults
 
 
 def train_model(
     X_train: pd.DataFrame,
     y_train: pd.Series,
     model_name: str,
-    task_type: str = "classification",
-    hyperparameters: Optional[Dict[str, Any]] = None
+    hyperparameters: Optional[Dict[str, Any]] = None,
+    task_type: Optional[str] = None,
 ) -> Tuple[Any, float]:
     """
-    Instantiates and fits an estimator based on task_type and algorithm name.
-    Tracks wall-clock training time in seconds.
+    Instantiates and trains a model using provided features and labels.
+
+    Args:
+        X_train: Preprocessed training features DataFrame.
+        y_train: Training target Series.
+        model_name: Algorithm key defined in registry (e.g. 'RandomForestClassifier').
+        hyperparameters: Dictionary of hyperparameters to override defaults.
+        task_type: Optional task type ('classification' or 'regression').
+
+    Returns:
+        fitted_model: Trained scikit-learn / XGBoost estimator object.
+        train_time (float): Training duration in seconds.
     """
-    if hyperparameters is None:
-        hyperparameters = {}
+    model_cls = get_model_class(model_name)
 
-    model_cls = get_model_class(task_type, model_name)
-    
-    clean_params = {}
-    for k, v in hyperparameters.items():
-        clean_params[k] = v
+    # Merge default hyperparameters with user-provided overrides
+    # Aliases such as "XGBoostClassifier" resolve to a class but have no metadata entry.
+    params = get_model_defaults(model_name) if model_name in MODEL_METADATA else {}
+    if hyperparameters:
+        params.update(hyperparameters)
 
-    model_instance = model_cls(**clean_params)
+    # Instantiate estimator
+    try:
+        estimator = model_cls(**params)
+    except TypeError as e:
+        raise ValueError(
+            f"Invalid hyperparameter configuration for model '{model_name}': {str(e)}"
+        )
 
+    # Measure wall-clock training time
     start_time = time.perf_counter()
-    model_instance.fit(X_train, y_train)
-    end_time = time.perf_counter()
+    estimator.fit(X_train, y_train)
+    elapsed_time = time.perf_counter() - start_time
 
-    train_time_sec = round(end_time - start_time, 4)
-
-    return model_instance, train_time_sec
+    return estimator, round(elapsed_time, 4)

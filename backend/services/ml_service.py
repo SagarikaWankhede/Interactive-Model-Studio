@@ -102,7 +102,7 @@ def preview_recipe(
 ) -> Dict[str, Any]:
     """Runs preprocessing recipe preview without model training."""
     df = load_dataset_dataframe(dataset_id, db)
-    X_tr, X_te, y_tr, y_te, _ = run_recipe(df, recipe, target_column)
+    X_tr, X_te, y_tr, y_te, _ = run_recipe(df, target_column=target_column, recipe=recipe)
     
     preview_df = pd.concat([X_tr, y_tr], axis=1).head(10)
     return {

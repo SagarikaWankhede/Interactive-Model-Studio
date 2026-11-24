@@ -46,13 +46,19 @@ export function preprocessRow(spec, raw) {
       cols.forEach((c, i) => {
         if (c in row) row[c] = Number(row[c]) * step.mul[i] + step.add[i];
       });
+    } else if (step.step === "clip") {
+      cols.forEach((c, i) => {
+        if (c in row && !isMissing(row[c])) row[c] = Math.min(step.upper[i], Math.max(step.lower[i], Number(row[c])));
+      });
     } else if (step.step === "encode" && step.method === "onehot") {
       let k = 0;
       cols.forEach((c, i) => {
         const value = row[c];
-        for (const cat of step.categories[i]) {
+        const dropped = step.drop_idx ? step.drop_idx[i] : null; // OneHotEncoder(drop="first")
+        step.categories[i].forEach((cat, j) => {
+          if (j === dropped) return;
           row[step.output_names[k++]] = sameCategory(value, cat) ? 1 : 0;
-        }
+        });
         delete row[c];
       });
     } else if (step.step === "encode") {

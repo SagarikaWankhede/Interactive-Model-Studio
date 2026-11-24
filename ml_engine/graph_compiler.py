@@ -18,6 +18,11 @@ produces:
 * ``blocks``  – which line range of ``code`` each node produced, so the UI can
   highlight "this node == these lines".
 
+Execution semantics follow ``ml_engine.recipe_runner``: the train/test split is
+always performed first, and every preprocessing step is fitted on the training
+rows only, then applied to the test rows (leakage-free). Nodes drawn above the
+Split node get a warning, because they still run after it.
+
 MVP scope: the graph must be a single linear chain (no branching/merging).
 """
 
@@ -25,6 +30,8 @@ import json
 from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
+
+from ml_engine.registry import MODEL_METADATA, get_model_defaults
 
 PREPROCESS_KINDS = ("impute", "scale", "encode", "drop_columns")
 NODE_KINDS = ("dataset", "split", "model", "evaluate") + PREPROCESS_KINDS
@@ -238,7 +245,11 @@ def compile_graph(
                 if method not in ("onehot", "ordinal"):
                     errors.append({"node_id": n["id"], "message": f"Unknown encoding method '{method}'."})
                 params["method"] = method
+                if method == "onehot":
+                    params["drop"] = None  # keep every category; unseen categories encode as all zeros
 
+            if split_idxs and chain.index(n) < split_idxs[0] and cols:
+                warnings.append({"node_id": n["id"], "message": "Drawn above the Split node, but the engine always splits first: this step learns from training rows only. Move the Split node up so the graph matches the code."})
             if cols:
                 recipe.append({"step": kind, "columns": cols, "params": params})
             if available is not None and cols and (kind == "drop_columns" or (kind == "encode" and params.get("method") == "onehot")):
@@ -262,7 +273,10 @@ def compile_graph(
                 errors.append({"node_id": n["id"], "message": f"Unsupported algorithm '{algorithm}'."})
             elif ALGORITHMS[algorithm][0] != task_type:
                 errors.append({"node_id": n["id"], "message": f"{algorithm} is a {ALGORITHMS[algorithm][0]} model, but target '{target}' is a {task_type} problem."})
-            model_config = {"algorithm": algorithm, "hyperparameters": _clean_hyperparams(p.get("hyperparameters", {}))}
+            # Same merge as ml_engine.training.train_model, so the generated code shows every parameter used.
+            hyperparameters = get_model_defaults(algorithm) if algorithm in MODEL_METADATA else {}
+            hyperparameters.update(_clean_hyperparams(p.get("hyperparameters", {})))
+            model_config = {"algorithm": algorithm, "hyperparameters": hyperparameters}
             steps_for_code.append({**n, "resolved": model_config})
         else:
             steps_for_code.append({**n, "resolved": {}})
@@ -305,23 +319,22 @@ def _banner(title: str) -> str:
 
 
 def generate_code(chain: List[Dict[str, Any]], filename: str, target: str, task_type: str) -> Tuple[str, List[Dict[str, Any]]]:
-    """Emit a standalone script mirroring ``run_recipe`` + training + evaluation."""
+    """Emit a standalone script mirroring ``run_recipe`` + training + evaluation.
+
+    Order follows the engine: load -> split -> preprocessing (fit on train, apply to test)
+    -> model -> evaluation. Each node's lines are recorded in ``blocks``.
+    """
     imports = {"import json", "import pandas as pd", "from sklearn.model_selection import train_test_split"}
     sections: List[Tuple[Optional[str], List[str]]] = []
     counters: Dict[str, int] = {}
-    split_done = False
-    has_model = False
     algorithm = None
 
     def var(prefix: str) -> str:
         counters[prefix] = counters.get(prefix, 0) + 1
         return f"{prefix}_{counters[prefix]}"
 
-    def split_lines(params: Dict[str, Any], implicit: bool) -> List[str]:
-        lines = []
-        if implicit:
-            lines.append("# No Split node in the graph, so the default 80/20 split is used.")
-        lines += [
+    def split_lines(params: Dict[str, Any]) -> List[str]:
+        return [
             "X = df.drop(columns=[target])",
             "y = df[target]",
             "X_train, X_test, y_train, y_test = train_test_split(",
@@ -330,118 +343,106 @@ def generate_code(chain: List[Dict[str, Any]], filename: str, target: str, task_
             ")",
             'print(f"Train rows: {len(X_train):,}   Test rows: {len(X_test):,}")',
         ]
-        return lines
 
-    for node in chain:
-        kind, nid = node["kind"], node["id"]
-        label = NODE_LABELS[kind]
-        lines: List[str] = []
+    datasets = [n for n in chain if n["kind"] == "dataset"]
+    splits = [n for n in chain if n["kind"] == "split"]
+    preprocess = [n for n in chain if n["kind"] in PREPROCESS_KINDS]
+    tail = [n for n in chain if n["kind"] in ("model", "evaluate")]
+    has_model = any(n["kind"] == "model" for n in tail)
 
-        if kind == "dataset":
-            reader = "read_parquet" if filename.lower().endswith(".parquet") else "read_csv"
-            lines += [
-                _banner(f"[{label}] Load the data"),
-                f"df = pd.{reader}({py_literal(filename)})",
-                f"target = {py_literal(target)}  # the column we want to predict",
-                'print(f"Loaded {len(df):,} rows x {df.shape[1]} columns")',
-            ]
+    # 1. Load
+    for node in datasets:
+        reader = "read_parquet" if filename.lower().endswith(".parquet") else "read_csv"
+        sections.append((node["id"], [
+            _banner(f"[{NODE_LABELS['dataset']}] Load the data"),
+            f"df = pd.{reader}({py_literal(filename)})",
+            f"target = {py_literal(target)}  # the column we want to predict",
+            'print(f"Loaded {len(df):,} rows x {df.shape[1]} columns")',
+        ]))
 
-        elif kind in PREPROCESS_KINDS:
-            cols = node.get("cols", [])
-            p = node.get("resolved", {})
-            stage = "learned from training rows only (after the split)" if split_done else "fitted on the full dataset (before the split)"
-            title = {
-                "impute": f"Fill missing values ({p.get('strategy')})",
-                "scale": f"Scale numeric features ({SCALERS.get(p.get('method'), '?')})",
-                "encode": f"Encode categories ({p.get('method')})",
-                "drop_columns": "Drop columns",
-            }[kind]
-            lines.append(_banner(f"[{label}] {title}"))
-            if not cols:
-                lines.append("# Skipped: no columns selected for this node.")
-            elif kind == "drop_columns":
-                lines.append(f"cols = {py_literal(cols)}")
-                if split_done:
-                    lines += ["X_train = X_train.drop(columns=cols)", "X_test = X_test.drop(columns=cols)"]
-                else:
-                    lines.append("df = df.drop(columns=cols)")
+    # 2. Split first, so nothing below can peek at the test rows
+    if splits:
+        sections.append((splits[0]["id"], [_banner(f"[{NODE_LABELS['split']}] Hold out data for an honest test")]
+                         + split_lines(splits[0]["resolved"])))
+    elif datasets and (preprocess or has_model):
+        sections.append((None, [_banner("[Train / Test Split] (default)"),
+                                "# No Split node in the graph, so the default 80/20 split is used."]
+                         + split_lines({"test_size": 0.2, "random_state": 42})))
+
+    # 3. Preprocessing: learn from training rows, reuse on test rows
+    for node in preprocess:
+        kind, cols, p = node["kind"], node.get("cols", []), node.get("resolved", {})
+        title = {
+            "impute": f"Fill missing values ({p.get('strategy')})",
+            "scale": f"Scale numeric features ({SCALERS.get(p.get('method'), '?')})",
+            "encode": f"Encode categories ({p.get('method')})",
+            "drop_columns": "Drop columns",
+        }[kind]
+        lines = [_banner(f"[{NODE_LABELS[kind]}] {title}")]
+        if not cols:
+            lines.append("# Skipped: no columns selected for this node.")
+        elif kind == "drop_columns":
+            lines += [f"cols = {py_literal(cols)}", "X_train = X_train.drop(columns=cols)", "X_test = X_test.drop(columns=cols)"]
+        elif kind == "encode":
+            name = var("encoder")
+            lines.append(f"cols = {py_literal(cols)}")
+            if p["method"] == "onehot":
+                imports.add("from sklearn.preprocessing import OneHotEncoder")
+                lines += [
+                    f'{name} = OneHotEncoder(sparse_output=False, handle_unknown="ignore")',
+                    "# categories are learned from the training rows (values compared as text)",
+                    f"train_enc = {name}.fit_transform(X_train[cols].astype(str))",
+                    f"test_enc = {name}.transform(X_test[cols].astype(str))",
+                    f"names = {name}.get_feature_names_out(cols)",
+                    "X_train = pd.concat([X_train.drop(columns=cols), pd.DataFrame(train_enc, columns=names, index=X_train.index)], axis=1)",
+                    "X_test = pd.concat([X_test.drop(columns=cols), pd.DataFrame(test_enc, columns=names, index=X_test.index)], axis=1)",
+                ]
             else:
-                if kind == "impute":
-                    imports.add("from sklearn.impute import SimpleImputer")
-                    name = var("imputer")
-                    args = f"strategy={py_literal(p['strategy'])}"
-                    if p["strategy"] == "constant":
-                        args += f", fill_value={py_literal(p.get('fill_value'))}"
-                    ctor = f"SimpleImputer({args})"
-                elif kind == "scale":
-                    cls = SCALERS[p["method"]]
-                    imports.add(f"from sklearn.preprocessing import {cls}")
-                    name = var("scaler")
-                    ctor = f"{cls}()"
-                else:
-                    name = var("encoder")
-                    if p["method"] == "onehot":
-                        imports.add("from sklearn.preprocessing import OneHotEncoder")
-                        ctor = 'OneHotEncoder(sparse_output=False, handle_unknown="ignore")'
-                    else:
-                        imports.add("from sklearn.preprocessing import OrdinalEncoder")
-                        ctor = 'OrdinalEncoder(handle_unknown="use_encoded_value", unknown_value=-1)'
+                imports.add("from sklearn.preprocessing import OrdinalEncoder")
+                lines += [
+                    f'{name} = OrdinalEncoder(handle_unknown="use_encoded_value", unknown_value=-1)',
+                    f"X_train[cols] = {name}.fit_transform(X_train[cols].astype(str))  # learn from training data",
+                    f"X_test[cols] = {name}.transform(X_test[cols].astype(str))        # reuse what was learned",
+                ]
+        else:
+            if kind == "impute":
+                imports.add("from sklearn.impute import SimpleImputer")
+                name = var("imputer")
+                args = f"strategy={py_literal(p['strategy'])}"
+                if p["strategy"] == "constant":
+                    args += f", fill_value={py_literal(p.get('fill_value'))}"
+                ctor = f"SimpleImputer({args})"
+            else:
+                cls = SCALERS[p["method"]]
+                imports.add(f"from sklearn.preprocessing import {cls}")
+                name = var("scaler")
+                ctor = f"{cls}()"
+            lines += [
+                f"cols = {py_literal(cols)}",
+                f"{name} = {ctor}",
+                f"X_train[cols] = {name}.fit_transform(X_train[cols])  # learn from training data",
+                f"X_test[cols] = {name}.transform(X_test[cols])        # reuse what was learned",
+            ]
+        sections.append((node["id"], lines))
 
-                lines.append(f"# {stage}")
-                lines.append(f"cols = {py_literal(cols)}")
-                lines.append(f"{name} = {ctor}")
-                onehot = kind == "encode" and p["method"] == "onehot"
-                if not split_done:
-                    if onehot:
-                        lines += [
-                            f"encoded = pd.DataFrame({name}.fit_transform(df[cols]), columns={name}.get_feature_names_out(cols), index=df.index)",
-                            "df = df.drop(columns=cols).join(encoded)",
-                        ]
-                    else:
-                        lines.append(f"df[cols] = {name}.fit_transform(df[cols])")
-                else:
-                    if onehot:
-                        lines += [
-                            f"train_enc = {name}.fit_transform(X_train[cols])",
-                            f"test_enc = {name}.transform(X_test[cols])",
-                            f"names = {name}.get_feature_names_out(cols)",
-                            "X_train = X_train.drop(columns=cols).join(pd.DataFrame(train_enc, columns=names, index=X_train.index))",
-                            "X_test = X_test.drop(columns=cols).join(pd.DataFrame(test_enc, columns=names, index=X_test.index))",
-                        ]
-                    else:
-                        lines += [
-                            f"X_train[cols] = {name}.fit_transform(X_train[cols])  # learn from training data",
-                            f"X_test[cols] = {name}.transform(X_test[cols])        # reuse what was learned",
-                        ]
-
-        elif kind == "split":
-            lines.append(_banner(f"[{label}] Hold out data for an honest test"))
-            lines += split_lines(node["resolved"], implicit=False)
-            split_done = True
-
-        elif kind == "model":
-            if not split_done:
-                sections.append((None, [_banner("[Train / Test Split] (default)")] + split_lines({"test_size": 0.2, "random_state": 42}, implicit=True)))
-                split_done = True
+    # 4. Model + evaluation
+    for node in tail:
+        if node["kind"] == "model":
             algorithm = node["resolved"].get("algorithm")
             if algorithm in ALGORITHMS:
                 imports.add(ALGORITHMS[algorithm][1])
             hp = node["resolved"].get("hyperparameters", {})
             args = ", ".join(f"{k}={py_literal(v)}" for k, v in hp.items())
-            lines += [
-                _banner(f"[{label}] Train {algorithm}"),
+            sections.append((node["id"], [
+                _banner(f"[{NODE_LABELS['model']}] Train {algorithm}"),
                 f"model = {algorithm}({args})",
                 "model.fit(X_train, y_train)",
                 'print("Training complete.")',
-            ]
-            has_model = True
+            ]))
+        else:
+            sections.append((node["id"], _evaluation_lines(task_type, imports)))
 
-        elif kind == "evaluate":
-            lines += _evaluation_lines(task_type, imports)
-
-        sections.append((nid, lines))
-
-    if has_model and not any(n["kind"] == "evaluate" for n in chain):
+    if has_model and not any(n["kind"] == "evaluate" for n in tail):
         sections.append((None, _evaluation_lines(task_type, imports)))
     if has_model:
         imports.add("import joblib")
@@ -458,7 +459,8 @@ def generate_code(chain: List[Dict[str, Any]], filename: str, target: str, task_
         '"""',
         "Auto-generated by Interactive Model Studio from your visual pipeline.",
         "Each block is tagged with the node that produced it, and runs the same",
-        "steps in the same order as the Studio's Train button.",
+        "steps in the same order as the Studio's Train button: the data is split",
+        "first, and every preprocessing step learns from the training rows only.",
         "",
         "Run it with:",
         "    pip install pandas scikit-learn joblib" + (" xgboost" if needs_xgb else ""),
@@ -477,6 +479,7 @@ def generate_code(chain: List[Dict[str, Any]], filename: str, target: str, task_
             blocks.append({"node_id": nid, "start": start, "end": len(out)})
         out.append("")
     return "\n".join(out).rstrip() + "\n", blocks
+
 
 
 def _evaluation_lines(task_type: str, imports: set) -> List[str]:

@@ -160,13 +160,15 @@ function Studio() {
     const chainNodes = chain.map((id) => byId[id]).filter(Boolean);
     const modelIdx = chainNodes.findIndex((n) => n.data.kind === "model");
 
-    if (INSERT_BEFORE_MODEL.has(kind) && modelIdx > 0) {
-      const model = chainNodes[modelIdx];
-      const prev = chainNodes[modelIdx - 1];
-      const node = makeNode(kind, { ...model.position });
-      const shift = new Set(chainNodes.slice(modelIdx).map((n) => n.id));
+    // The engine splits first, so a new Split goes right under the dataset; other steps go just above the model.
+    const insertAt = kind === "split" && chainNodes[0]?.data.kind === "dataset" && chainNodes.length > 1 ? 1 : modelIdx;
+    if (INSERT_BEFORE_MODEL.has(kind) && insertAt > 0) {
+      const next = chainNodes[insertAt];
+      const prev = chainNodes[insertAt - 1];
+      const node = makeNode(kind, { ...next.position });
+      const shift = new Set(chainNodes.slice(insertAt).map((n) => n.id));
       setNodes((nds) => [...nds.map((n) => (shift.has(n.id) ? { ...n, position: { ...n.position, y: n.position.y + ROW } } : n)), node]);
-      setEdges((eds) => [...eds.filter((e) => !(e.source === prev.id && e.target === model.id)), makeEdge(prev.id, node.id), makeEdge(node.id, model.id)]);
+      setEdges((eds) => [...eds.filter((e) => !(e.source === prev.id && e.target === next.id)), makeEdge(prev.id, node.id), makeEdge(node.id, next.id)]);
       setSelectedId(node.id);
       return;
     }

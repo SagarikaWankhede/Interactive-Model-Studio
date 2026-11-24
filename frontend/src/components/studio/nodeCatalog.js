@@ -49,7 +49,7 @@ export const NODE_TYPES = {
     group: "Training",
     color: "#d97706",
     sklearn: "train_test_split",
-    hint: "Holds out data to test the model honestly. Steps after the split learn from training rows only.",
+    hint: "Holds out data to test the model honestly. It always runs first; every later step learns from training rows only.",
     defaults: { test_size: 0.2, random_state: 42, stratify: false },
   },
   model: {
@@ -155,7 +155,7 @@ export function makeNode(kind, position, params) {
 
 /**
  * Build a sensible starter chain from a dataset's schema:
- * CSV → Drop IDs → Impute numeric → Impute categorical → Encode → Split → Scale → Model → Evaluate
+ * CSV → Split → Drop IDs → Impute numeric → Impute categorical → Encode → Scale → Model → Evaluate
  */
 export function starterPipeline(dataset, target) {
   const schema = dataset?.schema || [];
@@ -168,13 +168,14 @@ export function starterPipeline(dataset, target) {
   const isClassification = !targetInfo || targetInfo.type === "categorical" || (targetInfo.cardinality ?? 99) <= 10;
 
   const steps = [["dataset", { dataset_id: dataset.id, filename: dataset.filename || dataset.name, target_column: target, task_type: "auto" }]];
+  // The engine splits first, so the graph shows it first too.
+  steps.push(["split", { test_size: 0.2, random_state: 42, stratify: isClassification }]);
   if (idCols.length) steps.push(["drop_columns", { columns: idCols }]);
   if (numeric.some((c) => schema.find((s) => s.name === c)?.null_count > 0)) steps.push(["impute", { strategy: "median", columns: numeric }]);
   if (categorical.length) {
     if (categorical.some((c) => schema.find((s) => s.name === c)?.null_count > 0)) steps.push(["impute", { strategy: "most_frequent", columns: categorical }]);
     steps.push(["encode", { method: "onehot", columns: categorical }]);
   }
-  steps.push(["split", { test_size: 0.2, random_state: 42, stratify: isClassification }]);
   if (numeric.length) steps.push(["scale", { method: "standard", columns: numeric }]);
   const algorithm = isClassification ? "RandomForestClassifier" : "RandomForestRegressor";
   steps.push(["model", { algorithm, hyperparameters: defaultHyperparams(algorithm) }]);

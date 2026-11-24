@@ -185,8 +185,9 @@ export default function NodeInspector({ node, datasets, schema, issues, onChange
             Stratify (keep class proportions equal in train and test)
           </label>
           <p className="st-callout">
-            <strong>Why position matters:</strong> nodes <em>above</em> the split learn from all rows, including the test rows.
-            Nodes <em>below</em> it learn from training rows only — the leakage-free way. Watch the generated code change when you move it.
+            <strong>Why split first?</strong> The test rows must stay unseen. So the data is split before anything else, and every
+            preprocessing step learns from the training rows only (e.g. the imputer's median), then reuses that on the test rows.
+            Keep this node directly under the dataset so the graph reads in the same order as the code.
           </p>
         </>
       )}

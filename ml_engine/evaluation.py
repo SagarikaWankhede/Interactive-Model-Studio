@@ -1,10 +1,12 @@
 """
-Comprehensive model evaluation metrics, confusion matrix, and feature importances.
+Evaluation Module
+Calculates performance metrics, confusion matrices, and feature importances
+for classification and regression tasks.
 """
 
+from typing import Any, Dict, List, Optional
 import numpy as np
 import pandas as pd
-from typing import Dict, Any, List
 from sklearn.metrics import (
     accuracy_score,
     balanced_accuracy_score,
@@ -23,31 +25,126 @@ def extract_feature_importances(
     fitted_model: Any,
     feature_names: List[str],
 ) -> List[Dict[str, Any]]:
-    """Extracts and ranks feature importances or coefficients from a fitted model."""
+    """
+    Extracts and ranks feature importances or coefficients from a fitted model.
+    """
     importances = []
-    try:
-        if hasattr(fitted_model, "feature_importances_"):
-            raw_importances = fitted_model.feature_importances_
-            for name, val in zip(feature_names, raw_importances):
-                importances.append({"feature": name, "importance": round(float(val), 5)})
 
-        elif hasattr(fitted_model, "coef_"):
-            raw_coefs = fitted_model.coef_
-            if raw_coefs.ndim > 1:
-                mean_coefs = np.mean(np.abs(raw_coefs), axis=0)
-            else:
-                mean_coefs = np.abs(raw_coefs)
-            
-            total = np.sum(mean_coefs)
-            norm_coefs = mean_coefs / (total if total > 0 else 1.0)
-            for name, val in zip(feature_names, norm_coefs):
-                importances.append({"feature": name, "importance": round(float(val), 5)})
+    # Tree-based models (Random Forest, Decision Tree, Gradient Boosting, XGBoost)
+    if hasattr(fitted_model, "feature_importances_"):
+        raw_importances = fitted_model.feature_importances_
+        for name, val in zip(feature_names, raw_importances):
+            importances.append({"feature": name, "importance": round(float(val), 5)})
 
-        importances.sort(key=lambda x: x["importance"], reverse=True)
-    except Exception:
-        importances = []
+    # Linear models (Logistic Regression, Linear Regression)
+    elif hasattr(fitted_model, "coef_"):
+        raw_coefs = fitted_model.coef_
+        if raw_coefs.ndim > 1:
+            # Average across classes for multi-class linear models
+            mean_coefs = np.mean(np.abs(raw_coefs), axis=0)
+        else:
+            mean_coefs = np.abs(raw_coefs)
 
+        # Normalize sum to 1 for consistent comparison
+        total = np.sum(mean_coefs)
+        norm_coefs = mean_coefs / (total if total > 0 else 1.0)
+        for name, val in zip(feature_names, norm_coefs):
+            importances.append({"feature": name, "importance": round(float(val), 5)})
+
+    # Sort descending by importance score
+    importances.sort(key=lambda x: x["importance"], reverse=True)
     return importances
+
+
+def evaluate_classification(
+    fitted_model: Any,
+    X_test: pd.DataFrame,
+    y_test: pd.Series,
+) -> Dict[str, Any]:
+    """
+    Computes classification metrics, ROC-AUC, and confusion matrix.
+    """
+    y_pred = fitted_model.predict(X_test)
+    labels = np.unique(np.concatenate([y_test, y_pred]))
+
+    acc = accuracy_score(y_test, y_pred)
+    f1 = f1_score(y_test, y_pred, average="weighted", zero_division=0)
+    prec = precision_score(y_test, y_pred, average="weighted", zero_division=0)
+    rec = recall_score(y_test, y_pred, average="weighted", zero_division=0)
+
+    roc_auc = None
+    if hasattr(fitted_model, "predict_proba"):
+        try:
+            y_proba = fitted_model.predict_proba(X_test)
+            if len(labels) == 2:
+                roc_auc = roc_auc_score(y_test, y_proba[:, 1])
+            else:
+                roc_auc = roc_auc_score(y_test, y_proba, multi_class="ovr", average="weighted")
+        except Exception:
+            roc_auc = None
+
+    cm = confusion_matrix(y_test, y_pred, labels=labels)
+    cm_dict = {
+        "labels": [str(l) for l in labels],
+        "matrix": cm.tolist(),
+    }
+
+    def _r(v):
+        return round(float(v), 4)
+
+    metrics = {
+        "accuracy": _r(acc),
+        "f1_score": _r(f1),
+        "precision": _r(prec),
+        "recall": _r(rec),
+        # Explicit macro / weighted variants used by the backend, dashboards and generated code.
+        # Macro averages treat every class equally, which exposes poor minority-class performance.
+        "balanced_accuracy": _r(balanced_accuracy_score(y_test, y_pred)),
+        "precision_macro": _r(precision_score(y_test, y_pred, average="macro", zero_division=0)),
+        "precision_weighted": _r(prec),
+        "recall_macro": _r(recall_score(y_test, y_pred, average="macro", zero_division=0)),
+        "recall_weighted": _r(rec),
+        "f1_macro": _r(f1_score(y_test, y_pred, average="macro", zero_division=0)),
+        "f1_weighted": _r(f1),
+    }
+    if roc_auc is not None:
+        metrics["roc_auc"] = round(float(roc_auc), 4)
+
+    return {
+        "metrics": metrics,
+        "confusion_matrix": cm_dict,
+        "feature_importances": extract_feature_importances(fitted_model, list(X_test.columns)),
+    }
+
+
+def evaluate_regression(
+    fitted_model: Any,
+    X_test: pd.DataFrame,
+    y_test: pd.Series,
+) -> Dict[str, Any]:
+    """
+    Computes regression evaluation metrics (RMSE, MAE, R2, MSE).
+    """
+    y_pred = fitted_model.predict(X_test)
+
+    mse = mean_squared_error(y_test, y_pred)
+    rmse = np.sqrt(mse)
+    mae = mean_absolute_error(y_test, y_pred)
+    r2 = r2_score(y_test, y_pred)
+
+    metrics = {
+        "rmse": round(float(rmse), 4),
+        "mae": round(float(mae), 4),
+        "r2_score": round(float(r2), 4),
+        "r2": round(float(r2), 4),
+        "mse": round(float(mse), 4),
+    }
+
+    return {
+        "metrics": metrics,
+        "confusion_matrix": None,
+        "feature_importances": extract_feature_importances(fitted_model, list(X_test.columns)),
+    }
 
 
 def evaluate_model(
@@ -55,65 +152,14 @@ def evaluate_model(
     X_test: pd.DataFrame,
     y_test: pd.Series,
     task_type: str = "classification",
-    feature_names: List[str] = None
+    feature_names: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
-    """Evaluates fitted model on test set and computes standardized metrics."""
-    if feature_names is None:
-        feature_names = list(X_test.columns)
-
-    y_pred = fitted_model.predict(X_test)
-    results = {}
-
+    """
+    Dispatches evaluation according to task_type ('classification' or 'regression').
+    """
     if task_type.lower() == "classification":
-        metrics = {
-            "accuracy": round(float(accuracy_score(y_test, y_pred)), 4),
-            "balanced_accuracy": round(float(balanced_accuracy_score(y_test, y_pred)), 4),
-            "precision_macro": round(float(precision_score(y_test, y_pred, average="macro", zero_division=0)), 4),
-            "precision_weighted": round(float(precision_score(y_test, y_pred, average="weighted", zero_division=0)), 4),
-            "recall_macro": round(float(recall_score(y_test, y_pred, average="macro", zero_division=0)), 4),
-            "recall_weighted": round(float(recall_score(y_test, y_pred, average="weighted", zero_division=0)), 4),
-            "f1_macro": round(float(f1_score(y_test, y_pred, average="macro", zero_division=0)), 4),
-            "f1_weighted": round(float(f1_score(y_test, y_pred, average="weighted", zero_division=0)), 4),
-        }
-
-        try:
-            if hasattr(fitted_model, "predict_proba"):
-                y_prob = fitted_model.predict_proba(X_test)
-                if len(np.unique(y_test)) == 2:
-                    metrics["roc_auc"] = round(float(roc_auc_score(y_test, y_prob[:, 1])), 4)
-                else:
-                    metrics["roc_auc"] = round(float(roc_auc_score(y_test, y_prob, multi_class="ovr", average="macro")), 4)
-        except Exception:
-            metrics["roc_auc"] = None
-
-        cm = confusion_matrix(y_test, y_pred)
-        unique_labels = sorted(list(set(y_test).union(set(y_pred))))
-        cm_data = {
-            "labels": [str(lbl) for lbl in unique_labels],
-            "matrix": cm.tolist()
-        }
-
-        results["metrics"] = metrics
-        results["confusion_matrix"] = cm_data
-
+        return evaluate_classification(fitted_model, X_test, y_test)
     elif task_type.lower() == "regression":
-        mse = mean_squared_error(y_test, y_pred)
-        rmse = np.sqrt(mse)
-        mae = mean_absolute_error(y_test, y_pred)
-        r2 = r2_score(y_test, y_pred)
-
-        metrics = {
-            "mse": round(float(mse), 4),
-            "rmse": round(float(rmse), 4),
-            "mae": round(float(mae), 4),
-            "r2": round(float(r2), 4),
-        }
-
-        results["metrics"] = metrics
-        results["confusion_matrix"] = None
-
+        return evaluate_regression(fitted_model, X_test, y_test)
     else:
-        raise ValueError(f"Invalid task_type: {task_type}")
-
-    results["feature_importances"] = extract_feature_importances(fitted_model, feature_names)
-    return results
+        raise ValueError(f"Unknown task_type: '{task_type}'. Must be 'classification' or 'regression'.")

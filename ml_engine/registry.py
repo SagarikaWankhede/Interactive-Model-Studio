@@ -6,151 +6,135 @@ Used by both the execution engine and the code generator.
 """
 
 from typing import Any, Dict, List, Optional, Tuple, Type
-from sklearn.impute import SimpleImputer
-from sklearn.preprocessing import (
-    StandardScaler,
-    MinMaxScaler,
-    RobustScaler,
-    OneHotEncoder,
-    OrdinalEncoder,
-)
-from sklearn.ensemble import (
-    RandomForestClassifier,
-    GradientBoostingClassifier,
-    RandomForestRegressor,
-    GradientBoostingRegressor,
-)
-from sklearn.linear_model import LogisticRegression, LinearRegression
-from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
-
-try:
-    from xgboost import XGBClassifier, XGBRegressor
-    HAS_XGBOOST = True
-except ImportError:
-    HAS_XGBOOST = False
-
-TRANSFORMER_REGISTRY = {
-    "impute": {
-        "simple": SimpleImputer,
-        "mean": SimpleImputer,
-        "median": SimpleImputer,
-        "most_frequent": SimpleImputer,
-        "constant": SimpleImputer,
-    },
-    "scale": {
-        "standard": StandardScaler,
-        "minmax": MinMaxScaler,
-        "robust": RobustScaler,
-    },
-    "encode": {
-        "onehot": OneHotEncoder,
-        "ordinal": OrdinalEncoder,
-    }
-}
-
-MODEL_REGISTRY = {
-    "classification": {
-        "RandomForestClassifier": RandomForestClassifier,
-        "LogisticRegression": LogisticRegression,
-        "GradientBoostingClassifier": GradientBoostingClassifier,
-        "DecisionTreeClassifier": DecisionTreeClassifier,
-    },
-    "regression": {
-        "RandomForestRegressor": RandomForestRegressor,
-        "LinearRegression": LinearRegression,
-        "GradientBoostingRegressor": GradientBoostingRegressor,
-        "DecisionTreeRegressor": DecisionTreeRegressor,
-    }
-}
-
-if HAS_XGBOOST:
-    MODEL_REGISTRY["classification"]["XGBoostClassifier"] = XGBClassifier
-    MODEL_REGISTRY["classification"]["XGBClassifier"] = XGBClassifier
-    MODEL_REGISTRY["regression"]["XGBoostRegressor"] = XGBRegressor
-    MODEL_REGISTRY["regression"]["XGBRegressor"] = XGBRegressor
 
 
 def get_preprocessor_class(step_name: str, method_or_strategy: str = "default"):
-    """Dynamically resolves a preprocessing transformer class."""
-    key = step_name.lower()
-    if key in TRANSFORMER_REGISTRY:
-        methods = TRANSFORMER_REGISTRY[key]
-        if method_or_strategy in methods:
-            return methods[method_or_strategy]
-    raise ValueError(f"Unknown preprocessor: step='{step_name}', method='{method_or_strategy}'")
-
-
-def get_transformer(step_type: str, method_name: str):
-    """Retrieve transformer class from registry."""
-    if step_type not in TRANSFORMER_REGISTRY:
-        raise ValueError(f"Unknown preprocessing step type: {step_type}")
-    methods = TRANSFORMER_REGISTRY[step_type]
-    if method_name not in methods:
-        raise ValueError(f"Unsupported method '{method_name}' for step '{step_type}'. Available: {list(methods.keys())}")
-    return methods[method_name]
-
-
-def get_model_class(task_type_or_name: str, model_name: Optional[str] = None) -> Type[Any]:
     """
-    Returns the estimator class for a given model name.
-    Supports get_model_class('RandomForestClassifier') and get_model_class('classification', 'RandomForestClassifier').
+    Dynamically resolves a preprocessing transformer class.
+    Deferred imports ensure fast startup and clean error handling.
     """
-    if model_name is None:
-        model_name = task_type_or_name
-        task_type = "classification"
-    else:
-        task_type = task_type_or_name
+    from sklearn.impute import SimpleImputer
+    from sklearn.preprocessing import (
+        StandardScaler,
+        MinMaxScaler,
+        RobustScaler,
+        OneHotEncoder,
+        OrdinalEncoder,
+        PowerTransformer,
+        KBinsDiscretizer,
+        PolynomialFeatures,
+    )
+    from sklearn.decomposition import PCA
 
-    model_map: Dict[str, Type[Any]] = {
-        "RandomForestClassifier": RandomForestClassifier,
-        "LogisticRegression": LogisticRegression,
-        "GradientBoostingClassifier": GradientBoostingClassifier,
-        "RandomForestRegressor": RandomForestRegressor,
-        "LinearRegression": LinearRegression,
-        "GradientBoostingRegressor": GradientBoostingRegressor,
-        "DecisionTreeClassifier": DecisionTreeClassifier,
-        "DecisionTreeRegressor": DecisionTreeRegressor,
+    mapping = {
+        ("impute", "mean"): SimpleImputer,
+        ("impute", "median"): SimpleImputer,
+        ("impute", "most_frequent"): SimpleImputer,
+        ("impute", "constant"): SimpleImputer,
+        ("scale", "standard"): StandardScaler,
+        ("scale", "minmax"): MinMaxScaler,
+        ("scale", "robust"): RobustScaler,
+        ("encode", "onehot"): OneHotEncoder,
+        ("encode", "ordinal"): OrdinalEncoder,
+        ("power", "yeo-johnson"): PowerTransformer,
+        ("power", "box-cox"): PowerTransformer,
+        ("bin", "quantile"): KBinsDiscretizer,
+        ("bin", "uniform"): KBinsDiscretizer,
+        ("bin", "kmeans"): KBinsDiscretizer,
+        ("polynomial", "features"): PolynomialFeatures,
+        ("pca", "decomposition"): PCA,
     }
 
-    if HAS_XGBOOST:
-        model_map["XGBoostClassifier"] = XGBClassifier
-        model_map["XGBClassifier"] = XGBClassifier
-        model_map["XGBoostRegressor"] = XGBRegressor
-        model_map["XGBRegressor"] = XGBRegressor
-
-    if model_name in model_map:
-        return model_map[model_name]
-
-    if task_type in MODEL_REGISTRY and model_name in MODEL_REGISTRY[task_type]:
-        return MODEL_REGISTRY[task_type][model_name]
-
-    raise ValueError(f"Unsupported model '{model_name}' for task '{task_type}'. Available: {list(model_map.keys())}")
+    key = (step_name.lower(), method_or_strategy.lower())
+    if key not in mapping:
+        raise ValueError(
+            f"Unknown preprocessor: step='{step_name}', method/strategy='{method_or_strategy}'. "
+            f"Supported combinations: {list(mapping.keys())}"
+        )
+    return mapping[key]
 
 
+# Model mapping
+MODEL_MAP: Dict[str, str] = {
+    # Classification
+    "RandomForestClassifier": "sklearn.ensemble.RandomForestClassifier",
+    "LogisticRegression": "sklearn.linear_model.LogisticRegression",
+    "DecisionTreeClassifier": "sklearn.tree.DecisionTreeClassifier",
+    "GradientBoostingClassifier": "sklearn.ensemble.GradientBoostingClassifier",
+    "XGBClassifier": "xgboost.XGBClassifier",
+    "XGBoostClassifier": "xgboost.XGBClassifier",
+    # Regression
+    "RandomForestRegressor": "sklearn.ensemble.RandomForestRegressor",
+    "LinearRegression": "sklearn.linear_model.LinearRegression",
+    "DecisionTreeRegressor": "sklearn.tree.DecisionTreeRegressor",
+    "GradientBoostingRegressor": "sklearn.ensemble.GradientBoostingRegressor",
+    "XGBRegressor": "xgboost.XGBRegressor",
+    "XGBoostRegressor": "xgboost.XGBRegressor",
+}
+
+
+def get_model_class(model_or_task: str, model_name: Optional[str] = None) -> Type[Any]:
+    """
+    Returns the estimator class for a given model name.
+    Supports both signatures:
+      get_model_class("RandomForestClassifier")
+      get_model_class("classification", "RandomForestClassifier")
+    """
+    target_name = model_name if model_name is not None else model_or_task
+
+    if target_name not in MODEL_MAP:
+        raise ValueError(
+            f"Unsupported model '{target_name}'. Supported models: {list(MODEL_MAP.keys())}"
+        )
+
+    module_path, class_name = MODEL_MAP[target_name].rsplit(".", 1)
+
+    if module_path == "xgboost":
+        try:
+            import xgboost as xgb
+            return getattr(xgb, class_name)
+        except ImportError:
+            raise ImportError(
+                "xgboost is not installed. Please install it using 'pip install xgboost' "
+                "or choose a scikit-learn algorithm like 'GradientBoostingClassifier'."
+            )
+
+    import importlib
+    module = importlib.import_module(module_path)
+    return getattr(module, class_name)
+
+
+# Metadata describing models and their default hyperparameters
 MODEL_METADATA: Dict[str, Dict[str, Any]] = {
     "RandomForestClassifier": {
         "task_type": "classification",
         "library": "sklearn",
         "default_params": {"n_estimators": 100, "max_depth": None, "random_state": 42},
-        "description": "Ensemble of decision trees trained with bagging."
+        "description": "Ensemble of decision trees trained with bagging and random feature subspaces."
     },
     "LogisticRegression": {
         "task_type": "classification",
         "library": "sklearn",
         "default_params": {"C": 1.0, "max_iter": 1000, "random_state": 42},
-        "description": "Linear classification model."
-    },
-    "GradientBoostingClassifier": {
-        "task_type": "classification",
-        "library": "sklearn",
-        "default_params": {"n_estimators": 100, "learning_rate": 0.1, "max_depth": 3, "random_state": 42},
-        "description": "Boosting ensemble of decision trees."
+        "description": "Linear classification model using a logistic sigmoid loss function."
     },
     "DecisionTreeClassifier": {
         "task_type": "classification",
         "library": "sklearn",
         "default_params": {"max_depth": 5, "random_state": 42},
-        "description": "Single decision tree; fully interpretable."
+        "description": "Non-parametric tree-structured decision model."
+    },
+    "GradientBoostingClassifier": {
+        "task_type": "classification",
+        "library": "sklearn",
+        "default_params": {"n_estimators": 100, "learning_rate": 0.1, "max_depth": 3, "random_state": 42},
+        "description": "Additive boosting ensemble of shallow decision trees."
+    },
+    "XGBClassifier": {
+        "task_type": "classification",
+        "library": "xgboost",
+        "default_params": {"n_estimators": 100, "learning_rate": 0.1, "max_depth": 3, "random_state": 42},
+        "description": "Scalable, distributed gradient boosting library."
     },
     "RandomForestRegressor": {
         "task_type": "regression",
@@ -163,6 +147,24 @@ MODEL_METADATA: Dict[str, Dict[str, Any]] = {
         "library": "sklearn",
         "default_params": {"fit_intercept": True},
         "description": "Ordinary least squares linear regression."
+    },
+    "DecisionTreeRegressor": {
+        "task_type": "regression",
+        "library": "sklearn",
+        "default_params": {"max_depth": 5, "random_state": 42},
+        "description": "Single decision tree regression."
+    },
+    "GradientBoostingRegressor": {
+        "task_type": "regression",
+        "library": "sklearn",
+        "default_params": {"n_estimators": 100, "learning_rate": 0.1, "max_depth": 3, "random_state": 42},
+        "description": "Gradient boosting regression ensemble."
+    },
+    "XGBRegressor": {
+        "task_type": "regression",
+        "library": "xgboost",
+        "default_params": {"n_estimators": 100, "learning_rate": 0.1, "max_depth": 3, "random_state": 42},
+        "description": "XGBoost gradient boosting regression."
     },
 }
 
@@ -177,5 +179,5 @@ def list_supported_models(task_type: Optional[str] = None) -> List[str]:
 def get_model_defaults(model_name: str) -> Dict[str, Any]:
     """Returns the default hyperparameters for a given model."""
     if model_name not in MODEL_METADATA:
-        return {"random_state": 42}
+        raise ValueError(f"Unknown model: {model_name}")
     return MODEL_METADATA[model_name]["default_params"].copy()
