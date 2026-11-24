@@ -122,7 +122,7 @@ export default function Navbar() {
         <div className="status-section">
           <div 
             className={`status-pill ${status}`} 
-            title={`Backend: ${backendMessage} (http://127.0.0.1:8000)`}
+            title={`Backend: ${backendMessage} (${import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000"})`}
             onClick={checkConnection}
           >
             {status === "connected" && <CheckCircle2 size={14} className="text-success" />}

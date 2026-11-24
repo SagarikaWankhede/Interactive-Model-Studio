@@ -3,7 +3,9 @@
  * Connects frontend UI to backend core services.
  */
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
+const RAW_API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
+// Accept a bare host (e.g. "my-api.onrender.com") as well as a full URL.
+const API_BASE_URL = (/^https?:\/\//.test(RAW_API_BASE_URL) ? RAW_API_BASE_URL : `https://${RAW_API_BASE_URL}`).replace(/\/+$/, "");
 
 /**
  * Core request helper with error handling and response normalization.
