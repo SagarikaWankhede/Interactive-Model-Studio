@@ -10,7 +10,10 @@ import {
   CheckCircle2, 
   AlertCircle, 
   Loader2,
-  Sparkles
+  Sparkles,
+  Network,
+  Stethoscope,
+  Rocket
 } from "lucide-react";
 import api from "../api/client";
 
@@ -51,6 +54,27 @@ export default function Navbar() {
         </div>
 
         <nav className="nav-links">
+          <NavLink
+            to="/studio"
+            className={({ isActive }) => `nav-link ${isActive ? "active" : ""}`}
+          >
+            <Network size={15} />
+            <span>Studio</span>
+          </NavLink>
+          <NavLink
+            to="/doctor"
+            className={({ isActive }) => `nav-link ${isActive ? "active" : ""}`}
+          >
+            <Stethoscope size={15} />
+            <span>Data Doctor</span>
+          </NavLink>
+          <NavLink
+            to="/edge"
+            className={({ isActive }) => `nav-link ${isActive ? "active" : ""}`}
+          >
+            <Rocket size={15} />
+            <span>Edge Lab</span>
+          </NavLink>
           <NavLink 
             to="/upload" 
             className={({ isActive }) => `nav-link ${isActive ? "active" : ""}`}
@@ -78,6 +102,13 @@ export default function Navbar() {
           >
             <History size={15} />
             <span>Experiments</span>
+          </NavLink>
+          <NavLink 
+            to="/pipeline" 
+            className={({ isActive }) => `nav-link ${isActive ? "active" : ""}`}
+          >
+            <Workflow size={15} />
+            <span>Pipeline</span>
           </NavLink>
           <NavLink 
             to="/dashboard" 

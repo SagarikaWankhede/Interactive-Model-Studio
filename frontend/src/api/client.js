@@ -32,11 +32,16 @@ async function request(endpoint, options = {}) {
     }
 
     if (!response.ok) {
+      const detail = data && typeof data === "object" ? data.detail : null;
       const errorMessage =
-        (data && typeof data === "object" && data.detail) ||
+        (typeof detail === "string" && detail) ||
+        (detail && typeof detail === "object" && detail.message) ||
         (data && typeof data === "object" && data.message) ||
         `HTTP ${response.status}: ${response.statusText}`;
-      throw new Error(errorMessage);
+      const error = new Error(errorMessage);
+      error.status = response.status;
+      error.detail = detail;
+      throw error;
     }
 
     return data;
@@ -81,6 +86,40 @@ export const api = {
 
   // Phase 4: Model Export
   exportONNX: (experimentId) => request(`/export/${experimentId}`),
+  exportCode: (experimentId) => request(`/export/${experimentId}`),
+
+  // Visual pipeline editor (node graph -> code -> training)
+  compileGraph: (graph) => request("/api/graph/compile", { method: "POST", body: JSON.stringify(graph) }),
+  runGraph: (graph) => request("/api/graph/run", { method: "POST", body: JSON.stringify(graph) }),
+  getRunGraph: (runId) => request(`/api/graph/runs/${runId}`),
+
+  // Edge & browser deployment
+  convertForBrowser: (runId, { quantize = false } = {}) =>
+    request(`/api/runs/${runId}/onnx?quantize=${quantize}`, { method: "POST" }),
+  getBrowserExport: (runId) => request(`/api/runs/${runId}/onnx`),
+  onnxModelUrl: (runId, variant = "auto") => `${API_BASE_URL}/api/runs/${runId}/onnx/model?variant=${variant}`,
+  onnxSpecUrl: (runId) => `${API_BASE_URL}/api/runs/${runId}/onnx/spec`,
+  fetchOnnxModel: async (runId, variant = "auto") => {
+    const res = await fetch(`${API_BASE_URL}/api/runs/${runId}/onnx/model?variant=${variant}`);
+    if (!res.ok) throw new Error(`Could not download the model (HTTP ${res.status}).`);
+    return res.arrayBuffer();
+  },
+
+  // Data Doctor
+  getDatasetReport: (datasetId, target) =>
+    request(`/api/datasets/${datasetId}/report${target ? `?target=${encodeURIComponent(target)}` : ""}`),
+
+  // Active learning
+  getActiveLearning: (runId) => request(`/api/runs/${runId}/active-learning`),
+  scanRun: (runId, { threshold = 0.6, limit = 25 } = {}) =>
+    request(`/api/runs/${runId}/scan?threshold=${threshold}&limit=${limit}`, { method: "POST" }),
+  listEdgeCases: (runId, status) =>
+    request(`/api/edge-cases?run_id=${runId}${status ? `&status=${status}` : ""}`),
+  addEdgeCase: (payload) => request("/api/edge-cases", { method: "POST", body: JSON.stringify(payload) }),
+  labelEdgeCase: (caseId, label) =>
+    request(`/api/edge-cases/${caseId}/label`, { method: "POST", body: JSON.stringify({ label }) }),
+  dismissEdgeCase: (caseId) => request(`/api/edge-cases/${caseId}/dismiss`, { method: "POST" }),
+  retrainFromLabels: (runId) => request(`/api/runs/${runId}/retrain`, { method: "POST" }),
 };
 
 export default api;

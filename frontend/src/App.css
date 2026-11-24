@@ -1196,11 +1196,6 @@ body {
 @media (min-width: 1024px) {
   .lg\:grid-cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .min-w-\[280px\] { min-width: 280px; }
-=======
-  background-color: var(--bg-dark);
-  color: var(--text-main);
-  font-family: var(--font-family);
-  -webkit-font-smoothing: antialiased;
 }
 
 .studio-app {
@@ -1724,5 +1719,219 @@ body {
   align-items: center;
   gap: 16px;
   margin-bottom: 8px;
->>>>>>> c50f521 (feat: complete end-to-end ML Engine, Backend REST APIs, and React Frontend UI)
 }
+
+/* ============================================================
+   PIPELINE STUDIO — Recipe Builder
+   ============================================================ */
+
+.step-row-card {
+  background-color: #f8fafc;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  padding: 1rem;
+  transition: box-shadow 0.15s;
+}
+
+.step-row-card:hover {
+  box-shadow: 0 2px 8px rgba(79,70,229,0.07);
+}
+
+.step-row-header {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.75rem;
+}
+
+.step-index-badge {
+  display: inline-block;
+  background-color: #eef2ff;
+  color: var(--primary);
+  padding: 0.15rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.step-columns-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.col-toggle-chip {
+  display: inline-block;
+  padding: 0.2rem 0.6rem;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  border: 1px solid var(--border-color);
+  background: white;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.12s;
+}
+
+.col-toggle-chip:hover {
+  border-color: #818cf8;
+  color: var(--primary);
+}
+
+.col-toggle-chip.active {
+  background-color: #eef2ff;
+  border-color: var(--primary);
+  color: var(--primary);
+  font-weight: 600;
+}
+
+.btn-icon-danger {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 6px;
+  border: 1px solid #fecaca;
+  background: #fef2f2;
+  color: #ef4444;
+  cursor: pointer;
+  transition: all 0.12s;
+  flex-shrink: 0;
+}
+
+.btn-icon-danger:hover {
+  background-color: #fee2e2;
+}
+
+/* ============================================================
+   PIPELINE DAG CANVAS
+   ============================================================ */
+
+.pipeline-canvas {
+  overflow-x: auto;
+  padding: 1.5rem 0.5rem;
+}
+
+.pipeline-dag-track {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  min-width: max-content;
+}
+
+.pipeline-dag-node-wrapper {
+  display: flex;
+  align-items: center;
+}
+
+.pipeline-dag-node {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.65rem 1rem;
+  border-radius: 10px;
+  border: 2px solid;
+  min-width: 110px;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.05);
+  transition: transform 0.15s;
+}
+
+.pipeline-dag-node:hover {
+  transform: translateY(-2px);
+}
+
+.pipeline-node-icon-wrap {
+  flex-shrink: 0;
+}
+
+.pipeline-node-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.pipeline-node-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  display: inline-block;
+}
+
+.pipeline-node-detail {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.pipeline-dag-arrow {
+  display: flex;
+  align-items: center;
+  padding: 0 0.3rem;
+  flex-shrink: 0;
+}
+
+.pipeline-canvas-empty {
+  border: 2px dashed var(--border-color);
+  border-radius: 10px;
+  min-height: 100px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* ============================================================
+   PYTHON CODEGEN OUTPUT
+   ============================================================ */
+
+.codegen-output-box {
+  background-color: #0d1117;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid #30363d;
+}
+
+.codegen-topbar {
+  background-color: #161b22;
+  padding: 0.65rem 1rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid #30363d;
+}
+
+.codegen-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+}
+.dot-red    { background-color: #ff5f56; }
+.dot-yellow { background-color: #ffbd2e; }
+.dot-green  { background-color: #27c93f; }
+
+.codegen-filename {
+  font-size: 0.78rem;
+  color: #8b949e;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  margin-left: 0.6rem;
+}
+
+.codegen-pre {
+  margin: 0;
+  padding: 1.25rem;
+  overflow-x: auto;
+  max-height: 540px;
+  overflow-y: auto;
+  font-size: 0.78rem;
+  line-height: 1.6;
+  color: #e6edf3;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  white-space: pre;
+}
+
+/* space-y-3 helper */
+.space-y-3 > * + * { margin-top: 0.75rem; }
+

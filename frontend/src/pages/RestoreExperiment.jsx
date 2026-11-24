@@ -10,7 +10,11 @@ import {
   Play, 
   Code2, 
   Clock,
-  Sparkles
+  Sparkles,
+  Download,
+  Copy,
+  Check,
+  X
 } from "lucide-react";
 import api from "../api/client";
 import { mockExperiments } from "../api/mockData";
@@ -21,6 +25,9 @@ export default function RestoreExperiment() {
   const [experiment, setExperiment] = useState(null);
   const [loading, setLoading] = useState(true);
   const [restored, setRestored] = useState(false);
+  const [exportCode, setExportCode] = useState(null);
+  const [exportLoading, setExportLoading] = useState(false);
+  const [codeCopied, setCodeCopied] = useState(false);
 
   useEffect(() => {
     setLoading(true);
@@ -67,6 +74,72 @@ export default function RestoreExperiment() {
   const handleRestoreAndReRun = () => {
     const hyperparamsEncoded = encodeURIComponent(JSON.stringify(experiment.hyperparams || {}));
     navigate(`/experiments/run?datasetId=${experiment.dataset_id}&modelType=${experiment.model_type}&hyperparams=${hyperparamsEncoded}`);
+  };
+
+  const handleExportCode = async () => {
+    setExportLoading(true);
+    try {
+      const result = await api.exportCode(experiment.id);
+      setExportCode(result.standalone_script || result.code || JSON.stringify(result, null, 2));
+    } catch (err) {
+      // Fallback: generate a minimal script client-side
+      const algo = experiment.model_name || "RandomForestClassifier";
+      setExportCode(`"""
+Interactive Model Studio — Standalone Pipeline Export
+Algorithm : ${algo}
+Run ID    : ${experiment.id}
+Accuracy  : ${((experiment.metrics?.accuracy || 0) * 100).toFixed(2)}%
+"""
+
+import pandas as pd
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score
+
+# 1. Load dataset
+df = pd.read_csv("${experiment.dataset_name || 'dataset.csv'}")
+
+# 2. Preprocessing (configure per your Preprocessing Recipe)
+target = "${experiment.dataset_name ? 'Churn' : 'target'}"
+X = df.drop(columns=[target])
+y = df[target]
+
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.2, random_state=42, stratify=y
+)
+
+# 3. Train
+model = RandomForestClassifier(
+    ${Object.entries(experiment.hyperparams || {}).map(([k,v]) => `${k}=${typeof v === 'string' ? '"'+v+'"' : v}`).join(',\n    ')}
+)
+model.fit(X_train, y_train)
+
+# 4. Evaluate
+y_pred = model.predict(X_test)
+print(f"Accuracy: {accuracy_score(y_test, y_pred)*100:.2f}%")
+`);
+    } finally {
+      setExportLoading(false);
+    }
+  };
+
+  const copyExportCode = () => {
+    if (!exportCode) return;
+    navigator.clipboard.writeText(exportCode).then(() => {
+      setCodeCopied(true);
+      setTimeout(() => setCodeCopied(false), 2000);
+    });
+  };
+
+  const downloadExportCode = () => {
+    if (!exportCode) return;
+    const blob = new Blob([exportCode], { type: "text/x-python" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `pipeline_${experiment.id}.py`;
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
   return (
@@ -134,11 +207,11 @@ export default function RestoreExperiment() {
         <div>
           <strong className="text-sm block">Ready to restore this run?</strong>
           <span className="text-xs text-muted">
-            You can load this state into the interactive tuning form to adjust parameters or immediately execute a reproducibility check.
+            Reload this exact recipe and hyperparams, re-run, or export a standalone Python script.
           </span>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 flex-wrap">
           <button 
             className="btn btn-secondary flex items-center gap-2"
             onClick={handleRestoreAndReRun}
@@ -147,14 +220,59 @@ export default function RestoreExperiment() {
             <span>Re-Run Exact Config</span>
           </button>
           <button 
+            className="btn btn-secondary flex items-center gap-2"
+            onClick={handleExportCode}
+            disabled={exportLoading}
+          >
+            <Code2 size={15} />
+            <span>{exportLoading ? "Generating..." : "Export Python Code"}</span>
+          </button>
+          <button 
             className="btn btn-primary flex items-center gap-2"
             onClick={handleRestoreAndTune}
           >
             <RotateCcw size={15} />
-            <span>Restore & Tune Parameters</span>
+            <span>Restore &amp; Tune Parameters</span>
           </button>
         </div>
       </div>
+
+      {/* Exported Code Panel */}
+      {exportCode && (
+        <div className="studio-card mt-6">
+          <div className="flex justify-between items-center mb-3 flex-wrap gap-3">
+            <div className="flex items-center gap-2">
+              <Code2 size={18} className="text-primary" />
+              <h3 className="card-heading m-0">Exported Standalone Python Script</h3>
+            </div>
+            <div className="flex items-center gap-2">
+              <button className="btn btn-secondary btn-sm flex items-center gap-1.5" onClick={copyExportCode}>
+                {codeCopied ? <Check size={14} className="text-success" /> : <Copy size={14} />}
+                <span>{codeCopied ? "Copied!" : "Copy"}</span>
+              </button>
+              <button className="btn btn-primary btn-sm flex items-center gap-1.5" onClick={downloadExportCode}>
+                <Download size={14} />
+                <span>Download .py</span>
+              </button>
+              <button className="btn btn-secondary btn-sm" onClick={() => setExportCode(null)}>
+                <X size={14} />
+              </button>
+            </div>
+          </div>
+          <div className="codegen-output-box">
+            <div className="codegen-topbar">
+              <div className="flex items-center gap-2">
+                <div className="codegen-dot dot-red" />
+                <div className="codegen-dot dot-yellow" />
+                <div className="codegen-dot dot-green" />
+                <span className="codegen-filename">pipeline_{experiment.id}.py</span>
+              </div>
+              <span className="text-xs" style={{color:'#8b949e'}}>Python 3.8+</span>
+            </div>
+            <pre className="codegen-pre"><code>{exportCode}</code></pre>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

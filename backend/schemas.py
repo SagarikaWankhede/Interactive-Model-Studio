@@ -1,5 +1,5 @@
 from typing import List, Dict, Any, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 import datetime
 
 
@@ -9,17 +9,20 @@ class RecipeStep(BaseModel):
     params: Optional[Dict[str, Any]] = Field(default={}, description="Step parameters")
 
 
-class ModelConfig(BaseModel):
+class ModelSettings(BaseModel):
     algorithm: str = Field(..., description="Name of algorithm from registry")
     hyperparameters: Optional[Dict[str, Any]] = Field(default={}, description="Algorithm hyperparameters")
 
 
 class ExecutionRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     dataset_id: int
-    task_type: str = Field(..., description="classification or regression")
+    task_type: str = Field(default="classification", description="classification or regression")
     target_column: str
     recipe: List[RecipeStep]
-    model_settings: ModelConfig = Field(..., alias="model_config", description="Model configuration (algorithm + hyperparams)")
+    model_settings: ModelSettings = Field(..., alias="model_config", description="Model configuration (algorithm + hyperparams)")
+    use_cache: Optional[bool] = Field(default=True, description="Whether to use cached preprocessed data")
 
 
 class PreviewRecipeRequest(BaseModel):
@@ -33,29 +36,43 @@ class PredictRequest(BaseModel):
 
 
 class DatasetResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
     id: int
     filename: str
+    name: Optional[str] = None
     row_count: int
     col_count: int
+    column_count: Optional[int] = None
     column_types: Dict[str, str]
     missing_counts: Dict[str, int]
+    target_column: Optional[str] = None
+    schema_info: Optional[List[Dict[str, Any]]] = Field(default=None, alias="schema")
+    diagnostics: Optional[List[Dict[str, Any]]] = None
     created_at: datetime.datetime
-
-    class Config:
-        from_attributes = True
 
 
 class RunResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
     id: int
     dataset_id: int
     task_type: str
     algorithm: str
+    model_name: Optional[str] = None
+    model_type: Optional[str] = None
+    status: Optional[str] = "completed"
     train_time_sec: float
+    train_time: Optional[float] = None
     metrics: Dict[str, Any]
-    confusion_matrix: Optional[Dict[str, Any]] = None
+    confusion_matrix: Optional[Any] = None
     feature_importances: Optional[List[Dict[str, Any]]] = None
+    recipe: Optional[List[Dict[str, Any]]] = None
+    model_settings: Optional[Dict[str, Any]] = Field(default=None, alias="model_config")
     is_reproducible: bool
     created_at: datetime.datetime
 
-    class Config:
-        from_attributes = True
+
+class ModelMetadataResponse(BaseModel):
+    task_type: Optional[str] = None
+    models: List[Dict[str, Any]]

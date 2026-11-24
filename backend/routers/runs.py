@@ -1,5 +1,5 @@
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Body
 from sqlalchemy.orm import Session
 from ..database import get_db
 from ..models import RunDB
@@ -22,7 +22,8 @@ def execute_run(payload: ExecutionRequest, db: Session = Depends(get_db)):
             target_column=payload.target_column,
             recipe=recipe_dicts,
             model_config=model_config_dict,
-            db=db
+            db=db,
+            use_cache=payload.use_cache if payload.use_cache is not None else True,
         )
         return run_record
     except Exception as e:
@@ -36,7 +37,10 @@ def list_runs(db: Session = Depends(get_db)):
 
 
 @router.get("/compare")
-def compare_runs(ids: str = Query(..., description="Comma-separated run IDs, e.g. '1,2,3'"), db: Session = Depends(get_db)):
+def compare_runs(
+    ids: str = Query(..., description="Comma-separated run IDs, e.g. '1,2,3'"),
+    db: Session = Depends(get_db)
+):
     """Side-by-side comparison table of metrics across multiple runs."""
     try:
         run_ids = [int(i.strip()) for i in ids.split(",") if i.strip().isdigit()]
@@ -51,9 +55,13 @@ def compare_runs(ids: str = Query(..., description="Comma-separated run IDs, e.g
     for r in runs:
         comparison_data.append({
             "run_id": r.id,
+            "id": r.id,
             "algorithm": r.algorithm,
+            "model_name": r.algorithm,
+            "model_type": r.algorithm,
             "task_type": r.task_type,
             "train_time_sec": r.train_time_sec,
+            "train_time": r.train_time_sec,
             "metrics": r.metrics_json,
             "is_reproducible": r.is_reproducible,
             "created_at": r.created_at.isoformat(),

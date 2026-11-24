@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
 import Navbar from "./components/Navbar";
 import Upload from "./pages/Upload";
 import DatasetView from "./pages/DatasetView";
@@ -9,14 +9,24 @@ import ExperimentList from "./pages/ExperimentList";
 import RestoreExperiment from "./pages/RestoreExperiment";
 import Pipeline from "./pages/Pipeline";
 import Dashboard from "./pages/Dashboard";
+import VisualStudio from "./pages/VisualStudio";
+import DataDoctor from "./pages/DataDoctor";
+import EdgeLab from "./pages/EdgeLab";
 import "./App.css";
+import "./studio.css";
+
+function Main({ children }) {
+  // The visual editor needs the full window width for canvas + code side by side.
+  const wide = useLocation().pathname.startsWith("/studio");
+  return <main className={`main-content ${wide ? "main-content--wide" : ""}`}>{children}</main>;
+}
 
 export default function App() {
   return (
     <BrowserRouter>
       <div className="app-shell">
         <Navbar />
-        <main className="main-content">
+        <Main>
           <Routes>
             <Route path="/" element={<Navigate to="/upload" replace />} />
             <Route path="/upload" element={<Upload />} />
@@ -28,9 +38,12 @@ export default function App() {
             <Route path="/restore/:id" element={<RestoreExperiment />} />
             <Route path="/pipeline" element={<Pipeline />} />
             <Route path="/dashboard" element={<Dashboard />} />
+            <Route path="/studio" element={<VisualStudio />} />
+            <Route path="/doctor" element={<DataDoctor />} />
+            <Route path="/edge" element={<EdgeLab />} />
             <Route path="*" element={<Navigate to="/upload" replace />} />
           </Routes>
-        </main>
+        </Main>
       </div>
     </BrowserRouter>
   );
