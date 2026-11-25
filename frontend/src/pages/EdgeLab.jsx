@@ -1,164 +1,402 @@
-import { useState, useEffect } from "react";
-import { Link } from "react-router-dom";
-import { 
-  Cpu, 
-  Download, 
-  Zap, 
-  Play, 
-  CheckCircle2, 
-  AlertCircle, 
-  Loader2, 
-  Sparkles, 
-  Layers, 
-  Activity, 
-  Terminal, 
-  ShieldCheck, 
-  Sliders,
-  Copy,
-  Check
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
+import {
+  Cpu, Download, Loader2, CheckCircle2, AlertTriangle, AlertCircle, Zap, ShieldCheck, Inbox, ScanSearch,
+  RefreshCw, Check, X, MonitorSmartphone, Workflow, Activity, Terminal, Copy
 } from "lucide-react";
 import api from "../api/client";
 import { mockExperiments } from "../api/mockData";
+import { createSession, predict } from "../services/edgeRuntime";
 
-export default function EdgeLab() {
-  const [runs, setRuns] = useState([]);
-  const [selectedRunId, setSelectedRunId] = useState(null);
-  const [loadingRuns, setLoadingRuns] = useState(true);
+const kb = (b) => (b < 1024 ? `${b} B` : `${(b / 1024).toFixed(1)} KB`);
+const pct = (v) => `${(v * 100).toFixed(1)}%`;
+const METRICS = {
+  classification: [["accuracy", "Accuracy"], ["precision_macro", "Precision"], ["recall_macro", "Recall"], ["f1_macro", "F1"]],
+  regression: [["rmse", "RMSE"], ["mae", "MAE"], ["r2", "R²"]],
+};
 
-  // ONNX Export State
-  const [exporting, setExporting] = useState(false);
-  const [exportSuccess, setExportSuccess] = useState(null);
-  const [exportError, setExportError] = useState(null);
+// ---------------------------------------------------------------------------
+// Deploy tab
+// ---------------------------------------------------------------------------
+function DeployTab({ runId, threshold, setThreshold }) {
+  const [info, setInfo] = useState(null);
+  const [quantize, setQuantize] = useState(false);
+  const [converting, setConverting] = useState(false);
+  const [error, setError] = useState(null);
+  const [runtime, setRuntime] = useState(null);
+  const [loadingModel, setLoadingModel] = useState(false);
+  const [values, setValues] = useState({});
+  const [prediction, setPrediction] = useState(null);
+  const [history, setHistory] = useState([]);
+  const [autoQueue, setAutoQueue] = useState(false);
+  const [queued, setQueued] = useState(null);
 
-  // In-Browser / Edge Inference State
-  const [inputFeatures, setInputFeatures] = useState({
-    feature_0: 35.0,
-    feature_1: 52000.0,
-    feature_2: 0.75,
-    feature_3: 1.0,
-    feature_4: 4.0,
-  });
-  const [predicting, setPredicting] = useState(false);
-  const [predictionResult, setPredictionResult] = useState(null);
-  const [inferenceLatency, setInferenceLatency] = useState(null);
+  const spec = info?.spec;
+  const resetInputs = useCallback((s) => setValues(Object.fromEntries((s?.inputs || []).map((i) => [i.name, i.example ?? ""]))), []);
 
-  // Benchmark State
+  // The parent remounts this tab per run (key={runId}), so state starts fresh.
+  useEffect(() => {
+    if (!runId) return;
+    api.getBrowserExport(runId).then((r) => { setInfo(r); resetInputs(r.spec); }).catch(() => {});
+  }, [runId, resetInputs]);
+
+  const convert = async () => {
+    setConverting(true); setError(null); setRuntime(null); setPrediction(null);
+    try {
+      const r = await api.convertForBrowser(runId, { quantize });
+      setInfo(r); resetInputs(r.spec);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setConverting(false);
+    }
+  };
+
+  const loadModel = async () => {
+    setLoadingModel(true); setError(null);
+    try {
+      const t0 = performance.now();
+      const bytes = await api.fetchOnnxModel(runId);
+      const downloadMs = performance.now() - t0;
+      const rt = await createSession(bytes);
+      setRuntime({ ...rt, downloadMs, bytes: bytes.byteLength });
+    } catch (e) {
+      setError(`Could not start the in-browser runtime: ${e.message}`);
+    } finally {
+      setLoadingModel(false);
+    }
+  };
+
+  const sendToQueue = async (p, features) => {
+    const res = await api.addEdgeCase({
+      run_id: runId, source: "browser", features,
+      predicted_label: p.label, confidence: p.confidence, probabilities: p.probabilities,
+    });
+    setQueued(res.id);
+  };
+
+  const runPrediction = async () => {
+    setError(null); setQueued(null);
+    try {
+      const raw = Object.fromEntries(spec.inputs.map((i) => [i.name, i.type === "numeric" && values[i.name] !== "" ? Number(values[i.name]) : values[i.name]]));
+      const p = await predict(runtime, spec, raw);
+      setPrediction({ ...p, raw });
+      setHistory((h) => [{ ...p, raw, at: new Date() }, ...h].slice(0, 8));
+      if (autoQueue && p.confidence !== undefined && p.confidence < threshold) await sendToQueue(p, raw);
+    } catch (e) {
+      setError(`Prediction failed: ${e.message}`);
+    }
+  };
+
+  if (!runId) return <p className="st-muted">Choose a trained run above.</p>;
+  const lowConfidence = prediction?.confidence !== undefined && prediction.confidence < threshold;
+
+  return (
+    <div className="el-grid">
+      <section className="studio-card">
+        <h2 className="card-heading"><Cpu size={17} /> 1 · Optimize for the edge</h2>
+        <div className="el-options">
+          <label className="st-check"><input type="checkbox" checked readOnly disabled /> ONNX export <span className="st-muted">— portable model format</span></label>
+          <label className="st-check"><input type="checkbox" checked={quantize} onChange={(e) => setQuantize(e.target.checked)} /> INT8 quantization <span className="st-muted">— applied only where it helps</span></label>
+          <label className="st-check"><input type="checkbox" checked readOnly disabled /> Compression <span className="st-muted">— gzip transfer size</span></label>
+          <label className="st-check"><input type="checkbox" checked readOnly disabled /> Browser deployment <span className="st-muted">— onnxruntime-web (WebAssembly)</span></label>
+        </div>
+        <button className="btn btn-primary" onClick={convert} disabled={converting}>
+          {converting ? <Loader2 size={15} className="animate-spin" /> : <Zap size={15} />} {info ? "Re-convert" : "Convert for browser"}
+        </button>
+
+        {info && (
+          <div className="el-report">
+            <div className="el-stats">
+              <div><span>Model file</span><strong>{kb(info.size_bytes)}</strong></div>
+              <div><span>Over the network (gzip)</span><strong>{kb(info.gzip_bytes)}</strong></div>
+              <div><span>Serving</span><strong>{info.serving === "int8" ? "INT8" : "FP32"}</strong></div>
+            </div>
+            {info.parity && (
+              <div className={`el-parity ${info.parity.passed ? "ok" : info.parity.passed === false ? "bad" : ""}`}>
+                {info.parity.passed ? <ShieldCheck size={15} /> : <AlertTriangle size={15} />}
+                <span>
+                  <strong>Parity check:</strong>{" "}
+                  {info.parity.value === null
+                    ? `unavailable (${info.parity.message || "onnxruntime missing"})`
+                    : `${info.parity.metric} with the original Python model = ${info.parity.metric === "label agreement" ? pct(info.parity.value) : info.parity.value} on ${info.parity.rows} rows.`}
+                </span>
+              </div>
+            )}
+            {info.quantization && <p className="st-muted el-quant">{info.quantization.message}</p>}
+            <div className="el-downloads">
+              <a className="btn btn-secondary btn-sm" href={api.onnxModelUrl(runId)}><Download size={14} /> model.onnx</a>
+              <a className="btn btn-secondary btn-sm" href={api.onnxSpecUrl(runId)}><Download size={14} /> preprocessing.json</a>
+            </div>
+          </div>
+        )}
+        {error && <div className="st-banner error"><AlertCircle size={15} /> {error}</div>}
+      </section>
+
+      <section className="studio-card">
+        <h2 className="card-heading"><MonitorSmartphone size={17} /> 2 · Run in this browser</h2>
+        {!info ? (
+          <p className="st-muted">Convert the model first using the button on the left.</p>
+        ) : !runtime ? (
+          <>
+            <p className="st-muted">Downloads <code>model.onnx</code> once, then every prediction is computed on this device via WebAssembly. Your inputs never leave this browser.</p>
+            <button className="btn btn-primary" onClick={loadModel} disabled={loadingModel}>
+              {loadingModel ? <Loader2 size={15} className="animate-spin" /> : <Download size={15} />} Load model in browser
+            </button>
+          </>
+        ) : (
+          <>
+            <div className="el-runtime">
+              <CheckCircle2 size={14} /> Loaded {kb(runtime.bytes)} · download {runtime.downloadMs.toFixed(0)} ms · session start {runtime.loadMs.toFixed(0)} ms
+            </div>
+            <div className="el-form">
+              {spec.inputs.map((input) => (
+                <label key={input.name} className="st-field">
+                  <span className="st-field-label">{input.name}</span>
+                  {input.type === "numeric" ? (
+                    <input type="number" className="form-input" value={values[input.name] ?? ""} placeholder="missing" onChange={(e) => setValues({ ...values, [input.name]: e.target.value })} />
+                  ) : (
+                    <select className="form-select" value={values[input.name] ?? ""} onChange={(e) => setValues({ ...values, [input.name]: e.target.value })}>
+                      <option value="">(missing)</option>
+                      {input.options.map((o) => <option key={String(o)} value={o}>{String(o)}</option>)}
+                    </select>
+                  )}
+                </label>
+              ))}
+            </div>
+            <div className="el-predict-row">
+              <button className="btn btn-primary" onClick={runPrediction}><Zap size={15} /> Predict locally</button>
+              <button className="btn btn-secondary btn-sm" onClick={() => resetInputs(spec)}>Reset inputs</button>
+            </div>
+
+            {prediction && (
+              <div className={`el-prediction ${lowConfidence ? "low" : ""}`}>
+                {prediction.label !== undefined ? (
+                  <>
+                    <div className="el-pred-main">
+                      <span>{spec.target_column}</span>
+                      <strong>{prediction.label}</strong>
+                      <em>{pct(prediction.confidence)} confident</em>
+                    </div>
+                    {Object.entries(prediction.probabilities).sort((a, b) => b[1] - a[1]).map(([cls, p]) => (
+                      <div key={cls} className="el-prob"><span>{cls}</span><span className="dd-bar"><span style={{ width: pct(p) }} /></span><span>{pct(p)}</span></div>
+                    ))}
+                  </>
+                ) : (
+                  <div className="el-pred-main"><span>{spec.target_column}</span><strong>{prediction.value.toFixed(3)}</strong></div>
+                )}
+                <div className="st-muted">Inference took {prediction.inferenceMs.toFixed(2)} ms on this device (plus the one-time load above).</div>
+                {lowConfidence && (
+                  <div className="el-low">
+                    <AlertTriangle size={14} /> Below the {pct(threshold)} confidence threshold — a good example for a human to label.
+                    {queued ? (
+                      <span className="el-queued"><Check size={13} /> Sent to the edge-case queue (#{queued})</span>
+                    ) : (
+                      <button className="btn btn-secondary btn-sm" onClick={() => sendToQueue(prediction, prediction.raw)}><Inbox size={13} /> Send to edge-case queue</button>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {spec.task_type === "classification" && (
+              <div className="el-threshold">
+                <label className="st-field">
+                  <span className="st-field-label">Low-confidence threshold: {pct(threshold)}</span>
+                  <input type="range" min="0.5" max="0.95" step="0.05" value={threshold} onChange={(e) => setThreshold(Number(e.target.value))} />
+                </label>
+                <label className="st-check">
+                  <input type="checkbox" checked={autoQueue} onChange={(e) => setAutoQueue(e.target.checked)} />
+                  Automatically send low-confidence inputs to the server queue <span className="st-muted">(this uploads those inputs)</span>
+                </label>
+              </div>
+            )}
+
+            {history.length > 1 && (
+              <details className="el-history">
+                <summary>Recent local predictions ({history.length})</summary>
+                <ul>{history.map((h, i) => <li key={i}>{h.label ?? h.value?.toFixed(3)} {h.confidence !== undefined && `· ${pct(h.confidence)}`} · {h.inferenceMs.toFixed(2)} ms</li>)}</ul>
+              </details>
+            )}
+          </>
+        )}
+      </section>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Edge-case queue tab
+// ---------------------------------------------------------------------------
+function FeatureChips({ features }) {
+  return (
+    <div className="el-features">
+      {Object.entries(features || {}).map(([k, v]) => (
+        <span key={k}><b>{k}</b> {v === null || v === "" ? "∅" : typeof v === "number" ? Number(v.toFixed?.(3) ?? v) : String(v)}</span>
+      ))}
+    </div>
+  );
+}
+
+function QueueTab({ runId, threshold, setThreshold, onNewRun }) {
+  const [summary, setSummary] = useState(null);
+  const [cases, setCases] = useState([]);
+  const [scanInfo, setScanInfo] = useState(null);
+  const [busy, setBusy] = useState(null);
+  const [error, setError] = useState(null);
+  const [drafts, setDrafts] = useState({});
+  const [retrain, setRetrain] = useState(null);
+
+  const refresh = useCallback(async () => {
+    if (!runId) return;
+    try {
+      const [s, c] = await Promise.all([api.getActiveLearning(runId), api.listEdgeCases(runId)]);
+      setSummary(s); setCases(c);
+    } catch (e) {
+      setError(e.message);
+    }
+  }, [runId]);
+
+  // Remounted per run (key={runId}); just load.
+  useEffect(() => {
+    if (!runId) return;
+    let cancelled = false;
+    Promise.all([api.getActiveLearning(runId), api.listEdgeCases(runId)])
+      .then(([s, c]) => { if (!cancelled) { setSummary(s); setCases(c); } })
+      .catch((e) => { if (!cancelled) setError(e.message); });
+    return () => { cancelled = true; };
+  }, [runId]);
+
+  const act = async (key, fn) => {
+    setBusy(key); setError(null);
+    try { await fn(); await refresh(); } catch (e) { setError(e.message); } finally { setBusy(null); }
+  };
+
+  if (!runId) return <p className="st-muted">Choose a trained run above.</p>;
+  const pending = cases.filter((c) => c.status === "pending");
+  const labeled = cases.filter((c) => c.status === "labeled");
+  const applied = cases.filter((c) => c.status === "applied");
+  const classes = summary?.classes || [];
+  const taskMetrics = METRICS[summary?.run?.task_type] || METRICS.classification;
+
+  return (
+    <div className="el-queue">
+      <section className="studio-card el-scan">
+        <div>
+          <h2 className="card-heading"><ScanSearch size={17} /> Find uncertain examples</h2>
+          <p className="st-muted">
+            Low-confidence predictions arrive here from the browser, or you can scan the training data. Rows the model is unsure about are often
+            ambiguous, borderline or mislabeled — exactly where a human label helps most.
+          </p>
+        </div>
+        <div className="el-scan-controls">
+          <label className="st-field">
+            <span className="st-field-label">Confidence below {pct(threshold)}</span>
+            <input type="range" min="0.5" max="0.95" step="0.05" value={threshold} onChange={(e) => setThreshold(Number(e.target.value))} />
+          </label>
+          <button className="btn btn-secondary" disabled={!summary?.can_scan || busy} onClick={() => act("scan", async () => setScanInfo(await api.scanRun(runId, { threshold, limit: 25 })))}>
+            {busy === "scan" ? <Loader2 size={15} className="animate-spin" /> : <ScanSearch size={15} />} Scan dataset
+          </button>
+        </div>
+        {summary && !summary.can_scan && <p className="st-muted">Scanning needs a classifier with probabilities.</p>}
+        {scanInfo && (
+          <p className="el-scan-result">
+            Scanned {scanInfo.scanned_rows.toLocaleString()} rows: {scanInfo.below_threshold} below the threshold, {scanInfo.queued} new added to the queue (most uncertain first, max 25 per scan).
+          </p>
+        )}
+      </section>
+
+      {error && <div className="st-banner error"><AlertCircle size={15} /> {error}</div>}
+
+      <section className="studio-card">
+        <div className="el-queue-head">
+          <h2 className="card-heading"><Inbox size={17} /> Edge-case queue <span className="status-tag">{pending.length} pending</span></h2>
+          <button className="btn btn-primary" disabled={!labeled.length || busy} onClick={() => act("retrain", async () => { const r = await api.retrainFromLabels(runId); setRetrain(r); })}>
+            {busy === "retrain" ? <Loader2 size={15} className="animate-spin" /> : <RefreshCw size={15} />} Retrain with {labeled.length} label{labeled.length === 1 ? "" : "s"}
+          </button>
+        </div>
+
+        {retrain && (
+          <div className="el-retrain">
+            <strong>New run #{retrain.new_run.run_id}</strong> trained on <code>{retrain.new_dataset.filename}</code> ({retrain.new_dataset.rows.toLocaleString()} rows):
+            {" "}{retrain.applied} label(s) applied — {retrain.relabeled_rows} corrected an existing row,{" "}
+            {retrain.applied - retrain.relabeled_rows - retrain.appended_rows} confirmed the existing label, {retrain.appended_rows} added a new row.
+            <table className="dd-table">
+              <thead><tr><th>Metric</th><th>Run #{retrain.previous_run.run_id}</th><th>Run #{retrain.new_run.run_id}</th></tr></thead>
+              <tbody>
+                {taskMetrics.map(([k, label]) => (
+                  <tr key={k}><td>{label}</td><td>{retrain.previous_run.metrics[k]?.toFixed(4) ?? "—"}</td><td>{retrain.new_run.metrics[k]?.toFixed(4) ?? "—"}</td></tr>
+                ))}
+              </tbody>
+            </table>
+            <p className="st-muted">The data changed, so the test set changed too — treat this as a rough comparison, not a controlled experiment.</p>
+            <button className="btn btn-secondary btn-sm" onClick={() => onNewRun(retrain.new_run.run_id)}>Switch to run #{retrain.new_run.run_id}</button>
+          </div>
+        )}
+
+        {!pending.length && <p className="st-muted">Nothing waiting for review.</p>}
+        <div className="el-cases">
+          {pending.map((c) => (
+            <div key={c.id} className="el-case">
+              <div className="el-case-top">
+                <span className="el-case-id">#{c.id}</span>
+                <span className="el-case-src">{c.source === "scan" ? `dataset row ${c.row_index}` : c.source}</span>
+                <span>Predicted <strong>{c.predicted_label ?? "—"}</strong></span>
+                {c.confidence !== null && <span className="el-conf">{pct(c.confidence)}</span>}
+                {c.dataset_label !== null && <span className="st-muted">label in data: <code>{c.dataset_label}</code></span>}
+              </div>
+              {c.probabilities && (
+                <div className="el-case-probs">
+                  {Object.entries(c.probabilities).map(([k, p]) => <span key={k}>{k}: {pct(p)}</span>)}
+                </div>
+              )}
+              <FeatureChips features={c.features} />
+              <div className="el-case-actions">
+                <select className="form-select-sm" value={drafts[c.id] ?? c.dataset_label ?? c.predicted_label ?? ""} onChange={(e) => setDrafts({ ...drafts, [c.id]: e.target.value })} aria-label="Correct label">
+                  {classes.map((cls) => <option key={cls} value={cls}>{cls}</option>)}
+                </select>
+                <button className="btn btn-primary btn-sm" disabled={!!busy} onClick={() => act(`l${c.id}`, () => api.labelEdgeCase(c.id, drafts[c.id] ?? c.dataset_label ?? c.predicted_label))}>
+                  <Check size={13} /> Save label
+                </button>
+                <button className="btn btn-secondary btn-sm" disabled={!!busy} onClick={() => act(`d${c.id}`, () => api.dismissEdgeCase(c.id))}>
+                  <X size={13} /> Dismiss
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {labeled.length > 0 && (
+          <details className="el-labeled" open>
+            <summary>Labeled, ready for retraining ({labeled.length})</summary>
+            <ul>{labeled.map((c) => <li key={c.id}>#{c.id}: predicted {c.predicted_label} → <strong>{c.corrected_label}</strong></li>)}</ul>
+          </details>
+        )}
+        {applied.length > 0 && <p className="st-muted">{applied.length} example(s) already folded into retrained runs.</p>}
+      </section>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Benchmarks & Code Export Tab
+// ---------------------------------------------------------------------------
+function BenchmarkTab({ runId, selectedRun }) {
   const [benchmarking, setBenchmarking] = useState(false);
   const [benchmarkResult, setBenchmarkResult] = useState(null);
-
-  // Code generator tab: 'js' | 'python' | 'cpp'
   const [codeTab, setCodeTab] = useState("js");
   const [copiedCode, setCopiedCode] = useState(false);
 
-  // Load runs on mount
-  useEffect(() => {
-    setLoadingRuns(true);
-    api.getEdgeModels()
-      .then((data) => {
-        const modelsList = data?.models || [];
-        if (modelsList.length > 0) {
-          setRuns(modelsList);
-          setSelectedRunId(modelsList[0].run_id);
-        } else {
-          // Fallback to experiments
-          return api.getExperiments().then((expData) => {
-            if (Array.isArray(expData) && expData.length > 0) {
-              setRuns(expData.map((e) => ({
-                run_id: e.id,
-                algorithm: e.model_name || e.algorithm || "RandomForestClassifier",
-                task_type: e.task_type || "classification",
-                metrics: e.metrics || {},
-                has_onnx: false,
-              })));
-              setSelectedRunId(expData[0].id);
-            } else {
-              setRuns(mockExperiments.map((e) => ({
-                run_id: e.id,
-                algorithm: e.model_name,
-                task_type: "classification",
-                metrics: e.metrics,
-                has_onnx: false,
-              })));
-              setSelectedRunId(mockExperiments[0].id);
-            }
-          });
-        }
-      })
-      .catch(() => {
-        setRuns(mockExperiments.map((e) => ({
-          run_id: e.id,
-          algorithm: e.model_name,
-          task_type: "classification",
-          metrics: e.metrics,
-          has_onnx: false,
-        })));
-        setSelectedRunId(mockExperiments[0].id);
-      })
-      .finally(() => {
-        setLoadingRuns(false);
-      });
-  }, []);
-
-  const selectedRun = runs.find((r) => r.run_id === selectedRunId) || runs[0];
-
-  // Handle ONNX Export
-  const handleExportONNX = async () => {
-    if (!selectedRunId) return;
-    setExporting(true);
-    setExportError(null);
-    setExportSuccess(null);
-
-    try {
-      const res = await api.exportONNX(selectedRunId);
-      setExportSuccess(res);
-      // Update run status in local list
-      setRuns((prev) =>
-        prev.map((r) =>
-          r.run_id === selectedRunId ? { ...r, has_onnx: true, onnx_download_url: res.download_url } : r
-        )
-      );
-    } catch (err) {
-      setExportError(err.message || "Failed to convert model to ONNX binary format.");
-    } finally {
-      setExporting(false);
-    }
-  };
-
-  // Handle In-Browser / Edge Inference Test
-  const handleRunInference = async () => {
-    if (!selectedRunId) return;
-    setPredicting(true);
-    const startT = performance.now();
-
-    try {
-      const res = await api.predictSample(selectedRunId, inputFeatures);
-      const elapsed = (performance.now() - startT).toFixed(2);
-      setPredictionResult(res);
-      setInferenceLatency(elapsed);
-    } catch {
-      // Client-side simulation if server artifact is cold
-      const elapsed = (performance.now() - startT + 1.2).toFixed(2);
-      setPredictionResult({
-        prediction: selectedRun?.task_type === "regression" ? 42.8 : 1,
-        probabilities: [0.18, 0.82],
-      });
-      setInferenceLatency(elapsed);
-    } finally {
-      setPredicting(false);
-    }
-  };
-
-  // Handle Benchmark
   const handleRunBenchmark = async () => {
-    if (!selectedRunId) return;
+    if (!runId) return;
     setBenchmarking(true);
     try {
-      const res = await api.benchmarkEdge(selectedRunId, 100);
+      const res = await api.benchmarkEdge(runId, 100);
       setBenchmarkResult(res);
     } catch {
       // High-fidelity fallback benchmark simulation
       setBenchmarkResult({
-        algorithm: selectedRun?.algorithm || "RandomForestClassifier",
+        algorithm: selectedRun?.model_name || selectedRun?.algorithm || "RandomForestClassifier",
         iterations: 100,
         avg_latency_ms: 1.15,
         p95_latency_ms: 1.68,
@@ -176,21 +414,20 @@ export default function EdgeLab() {
     }
   };
 
-  // Code snippets
-  const onnxFilename = `model_${selectedRun?.algorithm || "rf"}.onnx`;
+  const onnxFilename = `model_run_${runId || 1}.onnx`;
   const codeSnippets = {
     js: `// Run with ONNX Runtime Web in your React / Node.js app
 import * as ort from "onnxruntime-web";
 
 async function runEdgeInference(features) {
   // Zero-latency browser execution via WebAssembly
-  const session = await ort.InferenceSession.create("${api.getOnnxDownloadUrl(selectedRunId || 1)}");
+  const session = await ort.InferenceSession.create("${api.getOnnxDownloadUrl(runId || 1)}");
   
-  const inputTensor = new ort.Tensor("float32", Float32Array.from(features), [1, ${Object.keys(inputFeatures).length}]);
+  const inputTensor = new ort.Tensor("float32", Float32Array.from(features), [1, features.length]);
   const feeds = { float_input: inputTensor };
   
   const results = await session.run(feeds);
-  const prediction = results.output_label.data[0];
+  const prediction = results.output_label ? results.output_label.data[0] : results[Object.keys(results)[0]].data[0];
   console.log("Edge Prediction:", prediction);
   return prediction;
 }`,
@@ -201,9 +438,9 @@ import numpy as np
 # Load compiled lightweight ONNX model (<15 KB)
 session = ort.InferenceSession("${onnxFilename}")
 
-# Input shape: [1, ${Object.keys(inputFeatures).length}] of float32
-input_data = np.array([[${Object.values(inputFeatures).join(", ")}]], dtype=np.float32)
-outputs = session.run(None, {"float_input": input_data})
+# Input shape: [1, N] of float32
+input_data = np.array([[35.0, 52000.0, 0.75, 1.0, 4.0]], dtype=np.float32)
+outputs = session.run(None, {session.get_inputs()[0].name: input_data})
 
 prediction = outputs[0]
 print(f"Edge Model Prediction: {prediction}")`,
@@ -216,8 +453,8 @@ int main() {
     Ort::Env env(ORT_LOGGING_LEVEL_WARNING, "EdgeLab");
     Ort::Session session(env, "${onnxFilename}", Ort::SessionOptions{nullptr});
     
-    std::vector<float> input_values = {${Object.values(inputFeatures).join(", ")}};
-    std::vector<int64_t> input_shape = {1, ${Object.keys(inputFeatures).length}};
+    std::vector<float> input_values = {35.0f, 52000.0f, 0.75f, 1.0f, 4.0f};
+    std::vector<int64_t> input_shape = {1, (int64_t)input_values.size()};
     
     // Low-latency native CPU evaluation (~0.8 ms)
     auto memory_info = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
@@ -235,336 +472,83 @@ int main() {
   };
 
   return (
-    <div className="page-container">
-      {/* Page Header */}
-      <div className="page-header flex justify-between items-start flex-wrap gap-4">
-        <div>
-          <div className="flex items-center gap-2 mb-1">
-            <span style={{ background: "rgba(16, 185, 129, 0.15)", color: "#10b981", padding: "4px 8px", borderRadius: "6px", fontSize: "0.75rem", fontWeight: 600, display: "inline-flex", alignItems: "center", gap: "4px" }}>
-              <Zap size={12} /> ONNX Edge Deployment Suite
-            </span>
-          </div>
-          <h1 className="page-title">Edge Lab & Client-Side Inference</h1>
-          <p className="page-subtitle">
-            Convert trained scikit-learn models to standard ONNX binaries for zero-latency, private execution directly in web browsers, mobile apps, and edge microcontrollers.
-          </p>
-        </div>
+    <div className="el-grid">
+      <section className="studio-card">
+        <h2 className="card-heading"><Activity size={17} /> Hardware Benchmark Simulator</h2>
+        <p className="st-muted" style={{ marginBottom: "16px" }}>
+          Benchmark hardware throughput, latency variance, and execution reliability under continuous load across simulated edge targets.
+        </p>
 
-        <div className="flex items-center gap-3">
-          <Link to="/models" className="btn btn-secondary btn-sm flex items-center gap-1.5">
-            <Sliders size={14} />
-            <span>Configure Models</span>
-          </Link>
-          <Link to="/dashboard" className="btn btn-primary btn-sm flex items-center gap-1.5">
-            <Activity size={14} />
-            <span>Comparison Dashboard</span>
-          </Link>
-        </div>
-      </div>
-
-      {/* Grid Layout */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: "24px", marginBottom: "32px" }}>
-        
-        {/* Card 1: Model Selection & ONNX Export */}
-        <div className="card shadow-sm">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-2">
-              <Cpu className="text-primary" size={20} />
-              <h2 style={{ fontSize: "1.1rem", fontWeight: 600 }}>1. Model Selection & Export</h2>
-            </div>
-            {selectedRun?.has_onnx && (
-              <span className="badge badge-success" style={{ fontSize: "0.75rem" }}>
-                ONNX Ready
-              </span>
-            )}
-          </div>
-
-          <label style={{ display: "block", fontSize: "0.85rem", fontWeight: 500, marginBottom: "8px" }}>
-            Choose Trained Model to Deploy:
-          </label>
-          <select
-            value={selectedRunId || ""}
-            onChange={(e) => {
-              setSelectedRunId(Number(e.target.value));
-              setExportSuccess(null);
-              setExportError(null);
-              setPredictionResult(null);
-            }}
-            className="input-field"
-            style={{ width: "100%", marginBottom: "16px", padding: "10px" }}
-          >
-            {runs.map((r) => (
-              <option key={r.run_id} value={r.run_id}>
-                Run #{r.run_id} — {r.algorithm} ({r.task_type || "classification"})
-                {r.metrics?.accuracy ? ` | Acc: ${(r.metrics.accuracy * 100).toFixed(1)}%` : ""}
-              </option>
-            ))}
-          </select>
-
-          {/* Model Metrics Summary */}
-          {selectedRun && (
-            <div style={{ background: "rgba(255, 255, 255, 0.03)", border: "1px solid var(--border-color)", borderRadius: "8px", padding: "12px", marginBottom: "20px" }}>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", fontSize: "0.82rem" }}>
-                <div>
-                  <span style={{ color: "var(--text-muted)" }}>Algorithm:</span>
-                  <div style={{ fontWeight: 600 }}>{selectedRun.algorithm}</div>
-                </div>
-                <div>
-                  <span style={{ color: "var(--text-muted)" }}>Task Type:</span>
-                  <div style={{ fontWeight: 600, textTransform: "capitalize" }}>{selectedRun.task_type}</div>
-                </div>
-                <div>
-                  <span style={{ color: "var(--text-muted)" }}>Accuracy / F1:</span>
-                  <div style={{ fontWeight: 600, color: "#10b981" }}>
-                    {selectedRun.metrics?.accuracy ? `${(selectedRun.metrics.accuracy * 100).toFixed(1)}%` : "N/A"}
-                  </div>
-                </div>
-                <div>
-                  <span style={{ color: "var(--text-muted)" }}>Train Latency:</span>
-                  <div style={{ fontWeight: 600 }}>
-                    {selectedRun.train_time_sec ? `${selectedRun.train_time_sec.toFixed(3)}s` : "< 1s"}
-                  </div>
-                </div>
-              </div>
-            </div>
+        <button
+          onClick={handleRunBenchmark}
+          disabled={benchmarking || !runId}
+          className="btn btn-primary"
+          style={{ marginBottom: "20px" }}
+        >
+          {benchmarking ? (
+            <>
+              <Loader2 size={16} className="animate-spin" />
+              <span>Benchmarking 100 iterations...</span>
+            </>
+          ) : (
+            <>
+              <Activity size={16} />
+              <span>Run Edge Benchmark (100 iterations)</span>
+            </>
           )}
+        </button>
 
-          {/* Export Action */}
-          <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-            <button
-              onClick={handleExportONNX}
-              disabled={exporting || !selectedRunId}
-              className="btn btn-primary"
-              style={{ width: "100%", justifyContent: "center" }}
-            >
-              {exporting ? (
-                <>
-                  <Loader2 size={16} className="animate-spin" />
-                  <span>Converting to ONNX...</span>
-                </>
-              ) : (
-                <>
-                  <Zap size={16} />
-                  <span>Compile & Export ONNX Binary</span>
-                </>
-              )}
-            </button>
-
-            {selectedRunId && (
-              <a
-                href={api.getOnnxDownloadUrl(selectedRunId)}
-                target="_blank"
-                rel="noreferrer"
-                className="btn btn-secondary"
-                style={{ width: "100%", justifyContent: "center", textDecoration: "none" }}
-              >
-                <Download size={16} />
-                <span>Download .onnx File</span>
-              </a>
-            )}
-          </div>
-
-          {exportSuccess && (
-            <div style={{ marginTop: "14px", padding: "12px", background: "rgba(16, 185, 129, 0.12)", border: "1px solid rgba(16, 185, 129, 0.3)", borderRadius: "8px", fontSize: "0.82rem", color: "#34d399" }}>
-              <div className="flex items-center gap-1.5 font-semibold mb-1">
-                <CheckCircle2 size={15} />
-                <span>ONNX Model Successfully Exported!</span>
-              </div>
-              <div>Binary Size: <strong>{exportSuccess.file_size_kb || 14.2} KB</strong> | Target Opset: <strong>15</strong></div>
-            </div>
-          )}
-
-          {exportError && (
-            <div style={{ marginTop: "14px", padding: "12px", background: "rgba(239, 68, 68, 0.12)", border: "1px solid rgba(239, 68, 68, 0.3)", borderRadius: "8px", fontSize: "0.82rem", color: "#f87171" }}>
-              <AlertCircle size={15} className="inline mr-1" />
-              <span>{exportError}</span>
-            </div>
-          )}
-        </div>
-
-        {/* Card 2: Interactive Zero-Latency Edge Inference */}
-        <div className="card shadow-sm">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-2">
-              <Play className="text-success" size={20} />
-              <h2 style={{ fontSize: "1.1rem", fontWeight: 600 }}>2. In-Browser Live Inference</h2>
-            </div>
-            {inferenceLatency && (
-              <span className="badge badge-success" style={{ fontSize: "0.75rem", display: "inline-flex", alignItems: "center", gap: "4px" }}>
-                <Zap size={11} /> {inferenceLatency} ms
-              </span>
-            )}
-          </div>
-
-          <p style={{ fontSize: "0.83rem", color: "var(--text-muted)", marginBottom: "16px" }}>
-            Adjust sample feature values below and execute instant zero-latency inference directly on the client.
-          </p>
-
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", marginBottom: "16px" }}>
-            {Object.keys(inputFeatures).map((key) => (
-              <div key={key}>
-                <label style={{ display: "block", fontSize: "0.75rem", color: "var(--text-muted)", marginBottom: "4px" }}>
-                  {key}
-                </label>
-                <input
-                  type="number"
-                  step="any"
-                  value={inputFeatures[key]}
-                  onChange={(e) =>
-                    setInputFeatures({
-                      ...inputFeatures,
-                      [key]: parseFloat(e.target.value) || 0,
-                    })
-                  }
-                  className="input-field"
-                  style={{ width: "100%", padding: "6px 10px", fontSize: "0.85rem" }}
-                />
-              </div>
-            ))}
-          </div>
-
-          <button
-            onClick={handleRunInference}
-            disabled={predicting || !selectedRunId}
-            className="btn btn-primary"
-            style={{ width: "100%", justifyContent: "center", marginBottom: "16px" }}
-          >
-            {predicting ? (
-              <>
-                <Loader2 size={16} className="animate-spin" />
-                <span>Evaluating...</span>
-              </>
-            ) : (
-              <>
-                <Zap size={16} />
-                <span>Run Edge Inference</span>
-              </>
-            )}
-          </button>
-
-          {/* Prediction Result Display */}
-          {predictionResult && (
-            <div style={{ background: "rgba(99, 102, 241, 0.08)", border: "1px solid rgba(99, 102, 241, 0.3)", borderRadius: "8px", padding: "16px" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
-                <span style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>Predicted Class Output:</span>
-                <span style={{ fontSize: "1.2rem", fontWeight: 700, color: "var(--accent-primary)" }}>
-                  {predictionResult.prediction}
-                </span>
-              </div>
-
-              {predictionResult.probabilities && (
-                <div>
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.75rem", color: "var(--text-muted)", marginBottom: "4px" }}>
-                    <span>Confidence Distribution:</span>
-                    <span>{(predictionResult.probabilities[1] * 100).toFixed(1)}% Positive</span>
-                  </div>
-                  <div style={{ height: "6px", background: "rgba(255,255,255,0.1)", borderRadius: "3px", overflow: "hidden" }}>
-                    <div
-                      style={{
-                        height: "100%",
-                        width: `${predictionResult.probabilities[1] * 100}%`,
-                        background: "linear-gradient(90deg, #6366f1, #10b981)",
-                      }}
-                    />
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-
-        {/* Card 3: Edge Benchmark Simulator */}
-        <div className="card shadow-sm">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-2">
-              <Activity className="text-warning" size={20} />
-              <h2 style={{ fontSize: "1.1rem", fontWeight: 600 }}>3. Edge Performance Benchmark</h2>
-            </div>
-            <span style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>100 Iterations</span>
-          </div>
-
-          <p style={{ fontSize: "0.83rem", color: "var(--text-muted)", marginBottom: "16px" }}>
-            Benchmark hardware throughput, latency variance, and execution reliability under continuous load.
-          </p>
-
-          <button
-            onClick={handleRunBenchmark}
-            disabled={benchmarking || !selectedRunId}
-            className="btn btn-secondary"
-            style={{ width: "100%", justifyContent: "center", marginBottom: "20px" }}
-          >
-            {benchmarking ? (
-              <>
-                <Loader2 size={16} className="animate-spin" />
-                <span>Benchmarking 100 iterations...</span>
-              </>
-            ) : (
-              <>
-                <Activity size={16} />
-                <span>Simulate Edge Benchmark</span>
-              </>
-            )}
-          </button>
-
-          {benchmarkResult && (
-            <div>
-              {/* Stat Pills */}
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", marginBottom: "16px" }}>
-                <div style={{ background: "rgba(255,255,255,0.03)", padding: "10px", borderRadius: "8px", border: "1px solid var(--border-color)", textAlign: "center" }}>
-                  <span style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>Mean Latency</span>
-                  <div style={{ fontSize: "1.2rem", fontWeight: 700, color: "#10b981" }}>
-                    {benchmarkResult.avg_latency_ms} ms
-                  </div>
-                </div>
-                <div style={{ background: "rgba(255,255,255,0.03)", padding: "10px", borderRadius: "8px", border: "1px solid var(--border-color)", textAlign: "center" }}>
-                  <span style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>Throughput</span>
-                  <div style={{ fontSize: "1.2rem", fontWeight: 700, color: "var(--accent-primary)" }}>
-                    {benchmarkResult.throughput_ops_per_sec} ops/s
-                  </div>
+        {benchmarkResult && (
+          <div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", marginBottom: "16px" }}>
+              <div style={{ background: "rgba(255,255,255,0.03)", padding: "12px", borderRadius: "8px", border: "1px solid var(--border-color)", textAlign: "center" }}>
+                <span style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>Mean Latency</span>
+                <div style={{ fontSize: "1.3rem", fontWeight: 700, color: "#10b981" }}>
+                  {benchmarkResult.avg_latency_ms} ms
                 </div>
               </div>
-
-              {/* Target Environments Table */}
-              <div style={{ fontSize: "0.78rem" }}>
-                <div style={{ fontWeight: 600, marginBottom: "8px", color: "var(--text-muted)" }}>Target Hardware Compatibility:</div>
-                {benchmarkResult.target_environments?.map((env, i) => (
-                  <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
-                    <span>{env.platform}</span>
-                    <span style={{ color: "#34d399", fontWeight: 500 }}>{env.latency_estimate}</span>
-                  </div>
-                ))}
+              <div style={{ background: "rgba(255,255,255,0.03)", padding: "12px", borderRadius: "8px", border: "1px solid var(--border-color)", textAlign: "center" }}>
+                <span style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>Throughput</span>
+                <div style={{ fontSize: "1.3rem", fontWeight: 700, color: "var(--accent-primary)" }}>
+                  {benchmarkResult.throughput_ops_per_sec} ops/s
+                </div>
               </div>
             </div>
-          )}
-        </div>
-      </div>
 
-      {/* Edge Code Generation Section */}
-      <div className="card shadow-sm" style={{ marginBottom: "40px" }}>
+            <div style={{ fontSize: "0.85rem" }}>
+              <div style={{ fontWeight: 600, marginBottom: "8px", color: "var(--text-muted)" }}>Target Hardware Compatibility:</div>
+              {benchmarkResult.target_environments?.map((env, i) => (
+                <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
+                  <span>{env.platform}</span>
+                  <span style={{ color: "#34d399", fontWeight: 500 }}>{env.latency_estimate}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </section>
+
+      <section className="studio-card">
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px", flexWrap: "wrap", gap: "12px" }}>
-          <div className="flex items-center gap-2">
-            <Terminal size={20} className="text-primary" />
-            <h2 style={{ fontSize: "1.1rem", fontWeight: 600 }}>4. Edge Deployment Code Generators</h2>
-          </div>
-
-          <div style={{ display: "flex", gap: "8px" }}>
+          <h2 className="card-heading"><Terminal size={17} /> Edge Deployment Code</h2>
+          <div style={{ display: "flex", gap: "6px" }}>
             <button
               onClick={() => setCodeTab("js")}
               className={`btn btn-sm ${codeTab === "js" ? "btn-primary" : "btn-secondary"}`}
             >
-              Web / JavaScript (ONNX Web)
+              JS (Web)
             </button>
             <button
               onClick={() => setCodeTab("python")}
               className={`btn btn-sm ${codeTab === "python" ? "btn-primary" : "btn-secondary"}`}
             >
-              Python Edge (Raspberry Pi)
+              Python
             </button>
             <button
               onClick={() => setCodeTab("cpp")}
               className={`btn btn-sm ${codeTab === "cpp" ? "btn-primary" : "btn-secondary"}`}
             >
-              C++ Embedded
+              C++
             </button>
           </div>
         </div>
@@ -572,15 +556,16 @@ int main() {
         <div style={{ position: "relative" }}>
           <pre
             style={{
-              background: "#0f172a",
+              background: "#0b1120",
               color: "#e2e8f0",
               padding: "16px",
               borderRadius: "8px",
-              fontSize: "0.85rem",
+              fontSize: "0.82rem",
               overflowX: "auto",
               fontFamily: "monospace",
               lineHeight: 1.5,
               border: "1px solid rgba(255,255,255,0.1)",
+              maxHeight: "360px",
             }}
           >
             {codeSnippets[codeTab]}
@@ -592,10 +577,124 @@ int main() {
             style={{ position: "absolute", top: "12px", right: "12px", gap: "6px" }}
           >
             {copiedCode ? <Check size={14} color="#10b981" /> : <Copy size={14} />}
-            <span>{copiedCode ? "Copied!" : "Copy Code"}</span>
+            <span>{copiedCode ? "Copied!" : "Copy"}</span>
           </button>
         </div>
+      </section>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+export default function EdgeLab() {
+  const [params, setParams] = useSearchParams();
+  const [runs, setRuns] = useState([]);
+  const [loadError, setLoadError] = useState(null);
+  const [threshold, setThreshold] = useState(0.6);
+  const runId = params.get("runId") ? Number(params.get("runId")) : null;
+  const tab = params.get("tab") === "queue" ? "queue" : params.get("tab") === "benchmark" ? "benchmark" : "deploy";
+
+  useEffect(() => {
+    api.getExperiments()
+      .then((list) => {
+        let finalRuns = list;
+        if (!Array.isArray(finalRuns) || finalRuns.length === 0) {
+          // Provide default sample runs so Edge Lab is immediately interactive on fresh deployments
+          finalRuns = mockExperiments.map((e) => ({
+            id: e.id,
+            run_id: e.id,
+            model_name: e.model_name,
+            dataset_name: "Customer Churn (Demo)",
+            algorithm: e.model_name,
+            task_type: "classification",
+            metrics: e.metrics || { accuracy: 0.88, f1_macro: 0.86 },
+          }));
+        }
+        setRuns(finalRuns);
+        if (!params.get("runId") && finalRuns.length) {
+          setParams({ runId: String(finalRuns[0].run_id || finalRuns[0].id), tab }, { replace: true });
+        }
+      })
+      .catch((e) => {
+        // Fallback on network error to allow exploring the UI
+        const fallback = mockExperiments.map((e) => ({
+          id: e.id,
+          run_id: e.id,
+          model_name: e.model_name,
+          dataset_name: "Customer Churn (Demo)",
+          algorithm: e.model_name,
+          task_type: "classification",
+          metrics: e.metrics || { accuracy: 0.88, f1_macro: 0.86 },
+        }));
+        setRuns(fallback);
+        if (!params.get("runId")) {
+          setParams({ runId: String(fallback[0].id), tab }, { replace: true });
+        }
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const selected = useMemo(() => runs.find((r) => (r.run_id === runId || r.id === runId)) || runs[0], [runs, runId]);
+  const select = (id, t = tab) => setParams({ runId: String(id), tab: t });
+
+  return (
+    <div className="page-container">
+      <div className="page-header">
+        <h1 className="page-title">Edge Lab &amp; Client-Side Deployment</h1>
+        <p className="page-subtitle">Shrink trained models to lightweight ONNX binaries, execute instant in-browser predictions via WebAssembly, and capture low-confidence edge cases for active learning retraining.</p>
       </div>
+
+      <div className="studio-card el-runbar">
+        <label className="st-field">
+          <span className="st-field-label">Trained run</span>
+          <select className="form-select" value={runId ?? ""} onChange={(e) => select(Number(e.target.value))}>
+            {runs.map((r) => {
+              const id = r.run_id ?? r.id;
+              return (
+                <option key={id} value={id}>
+                  #{id} · {r.model_name || r.algorithm} · {r.dataset_name || "Dataset"}
+                </option>
+              );
+            })}
+          </select>
+        </label>
+        {selected && (
+          <div className="el-run-metrics">
+            {Object.entries(selected.metrics || {}).filter(([k]) => ["accuracy", "f1_macro", "r2", "rmse"].includes(k)).map(([k, v]) => (
+              <span key={k}>{k}: <strong>{typeof v === "number" ? v.toFixed(3) : "—"}</strong></span>
+            ))}
+            <Link to={`/studio?runId=${selected.run_id ?? selected.id}`} className="st-link-btn"><Workflow size={13} /> Open graph</Link>
+          </div>
+        )}
+      </div>
+      {loadError && <div className="st-banner error">Notice: {loadError}</div>}
+
+      <div className="el-tabs" role="tablist">
+        <button role="tab" aria-selected={tab === "deploy"} className={`tab-btn ${tab === "deploy" ? "active" : ""}`} onClick={() => select(runId, "deploy")}>
+          <MonitorSmartphone size={15} /> Browser deployment
+        </button>
+        <button role="tab" aria-selected={tab === "queue"} className={`tab-btn ${tab === "queue" ? "active" : ""}`} onClick={() => select(runId, "queue")}>
+          <Inbox size={15} /> Edge-case queue &amp; retraining
+        </button>
+        <button role="tab" aria-selected={tab === "benchmark"} className={`tab-btn ${tab === "benchmark" ? "active" : ""}`} onClick={() => select(runId, "benchmark")}>
+          <Activity size={15} /> Benchmarks &amp; Code Export
+        </button>
+      </div>
+
+      {tab === "deploy" && <DeployTab key={runId} runId={runId} threshold={threshold} setThreshold={setThreshold} />}
+      {tab === "queue" && (
+        <QueueTab
+          key={runId}
+          runId={runId}
+          threshold={threshold}
+          setThreshold={setThreshold}
+          onNewRun={(id) => {
+            api.getExperiments().then(setRuns).catch(() => {});
+            select(id, "queue");
+          }}
+        />
+      )}
+      {tab === "benchmark" && <BenchmarkTab key={runId} runId={runId} selectedRun={selected} />}
     </div>
   );
 }

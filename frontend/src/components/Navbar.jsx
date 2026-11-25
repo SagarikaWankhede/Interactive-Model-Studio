@@ -14,7 +14,10 @@ import {
   Zap,
   LogIn,
   LogOut,
-  User
+  User,
+  Network,
+  Stethoscope,
+  Rocket
 } from "lucide-react";
 import api from "../api/client";
 import { useAuth } from "../context/AuthContext";
@@ -57,6 +60,20 @@ export default function Navbar() {
         </Link>
 
         <nav className="nav-links">
+          <NavLink
+            to="/studio"
+            className={({ isActive }) => `nav-link ${isActive ? "active" : ""}`}
+          >
+            <Network size={15} />
+            <span>Studio</span>
+          </NavLink>
+          <NavLink
+            to="/doctor"
+            className={({ isActive }) => `nav-link ${isActive ? "active" : ""}`}
+          >
+            <Stethoscope size={15} />
+            <span>Data Doctor</span>
+          </NavLink>
           <NavLink 
             to="/upload" 
             className={({ isActive }) => `nav-link ${isActive ? "active" : ""}`}
@@ -104,7 +121,7 @@ export default function Navbar() {
             className={({ isActive }) => `nav-link ${isActive ? "active" : ""}`}
             style={{ position: "relative" }}
           >
-            <Zap size={15} color="#10b981" />
+            <Rocket size={15} color="#10b981" />
             <span style={{ fontWeight: 600 }}>Edge Lab</span>
             <span style={{ 
               position: "absolute", 
@@ -126,7 +143,7 @@ export default function Navbar() {
           {/* Health status pill */}
           <div 
             className={`status-pill ${status}`} 
-            title={`Backend: ${backendMessage}`}
+            title={`Backend: ${backendMessage} (${api.getBaseUrl()})`}
             onClick={checkConnection}
             style={{ cursor: "pointer" }}
           >

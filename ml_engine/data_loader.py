@@ -16,6 +16,11 @@ BOOL_TRUE_VALUES = {"true", "1", "t", "yes", "y", "enable"}
 BOOL_FALSE_VALUES = {"false", "0", "f", "no", "n", "disable"}
 
 
+def _is_text_dtype(dtype) -> bool:
+    """True for plain-object columns and pandas' string dtype (default for text in pandas >= 3)."""
+    return dtype == "object" or isinstance(dtype, pd.StringDtype)
+
+
 def detect_and_coerce_types(df: pd.DataFrame, max_cardinality_ratio: float = 0.5) -> pd.DataFrame:
     """
     Infers and coerces columns into appropriate semantic types:
@@ -34,7 +39,7 @@ def detect_and_coerce_types(df: pd.DataFrame, max_cardinality_ratio: float = 0.5
             continue
 
         # 2. Check for Boolean values disguised as strings or mixed objects
-        if series.dtype == "object":
+        if _is_text_dtype(series.dtype):
             non_null = series.dropna().astype(str).str.strip().str.lower()
             if len(non_null) > 0:
                 unique_vals = set(non_null.unique())
@@ -46,7 +51,7 @@ def detect_and_coerce_types(df: pd.DataFrame, max_cardinality_ratio: float = 0.5
                     continue
 
         # 3. Check for Datetime strings (e.g. '2024-01-15', '2023-08-01 14:30:00')
-        if series.dtype == "object":
+        if _is_text_dtype(series.dtype):
             sample = series.dropna().astype(str).head(50)
             if len(sample) > 0 and sample.str.contains(r"^\d{4}[-/]\d{1,2}[-/]\d{1,2}").all():
                 try:
@@ -56,7 +61,7 @@ def detect_and_coerce_types(df: pd.DataFrame, max_cardinality_ratio: float = 0.5
                     pass
 
         # 4. Check for Numeric disguised as strings
-        if series.dtype == "object":
+        if _is_text_dtype(series.dtype):
             converted_num = pd.to_numeric(series, errors="coerce")
             # If at least 90% of non-null values converted cleanly to numbers
             if converted_num.notna().sum() > 0.9 * series.notna().sum():
@@ -92,7 +97,7 @@ def optimize_memory(df: pd.DataFrame, verbose: bool = False) -> Tuple[pd.DataFra
             df[col] = pd.to_numeric(df[col], downcast="integer")
 
         # Optimize object / string columns to categories if cardinality is reasonably low
-        elif col_type == "object":
+        elif _is_text_dtype(col_type):
             num_unique = df[col].nunique()
             num_total = len(df[col])
             if num_total > 0 and (num_unique / num_total < 0.5) and num_unique < 1000:

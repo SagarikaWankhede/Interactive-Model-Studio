@@ -8,7 +8,7 @@ import time
 from typing import Any, Dict, Optional, Tuple
 import pandas as pd
 
-from ml_engine.registry import get_model_class, get_model_defaults
+from ml_engine.registry import MODEL_METADATA, get_model_class, get_model_defaults
 
 
 def train_model(
@@ -35,7 +35,8 @@ def train_model(
     model_cls = get_model_class(model_name)
 
     # Merge default hyperparameters with user-provided overrides
-    params = get_model_defaults(model_name)
+    # Aliases such as "XGBoostClassifier" resolve to a class but have no metadata entry.
+    params = get_model_defaults(model_name) if model_name in MODEL_METADATA else {}
     if hyperparameters:
         params.update(hyperparameters)
 

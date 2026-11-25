@@ -1,5 +1,5 @@
 import os
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, declarative_base
 
 # SQLite database file stored in backend/data.db
@@ -25,5 +25,24 @@ def get_db():
 
 
 def init_db():
-    """Creates database tables if they do not exist."""
+    """Creates database tables if they do not exist and applies migrations."""
     Base.metadata.create_all(bind=engine)
+    
+    # Run soft column migrations for SQLite
+    with engine.connect() as conn:
+        try:
+            conn.execute(text("ALTER TABLE runs ADD COLUMN recipe_json JSON"))
+            conn.commit()
+        except Exception:
+            pass
+        for ddl in (
+            "ALTER TABLE runs ADD COLUMN model_config_json JSON",
+            "ALTER TABLE runs ADD COLUMN graph_json JSON",
+            "ALTER TABLE runs ADD COLUMN generated_code TEXT",
+            "ALTER TABLE runs ADD COLUMN parent_run_id INTEGER",
+        ):
+            try:
+                conn.execute(text(ddl))
+                conn.commit()
+            except Exception:
+                conn.rollback()

@@ -25,8 +25,9 @@ from ml_engine.preprocessing import (
 
 def run_recipe(
     df: pd.DataFrame,
-    target_column: str,
-    recipe: List[Dict[str, Any]],
+    target_column: Optional[str] = None,
+    recipe: Optional[List[Dict[str, Any]]] = None,
+    target_col: Optional[str] = None,
 ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.Series, pd.Series, List[Dict[str, Any]]]:
     """
     Executes a sequence of preprocessing steps on a raw DataFrame.
@@ -43,6 +44,14 @@ def run_recipe(
         y_test (pd.Series): Testing target labels.
         fitted_transformers (List[Dict]): List of fitted transformer objects and metadata.
     """
+    # Backwards compatibility: older callers used run_recipe(df, recipe, target_column).
+    if isinstance(target_column, list):
+        target_column, recipe = recipe if isinstance(recipe, str) else target_col, target_column
+    target_column = target_column or target_col
+    recipe = recipe or []
+    if not target_column:
+        raise ValueError("Target column must be provided to run_recipe.")
+
     if target_column not in df.columns:
         raise ValueError(f"Target column '{target_column}' is not present in the dataset.")
 
@@ -204,6 +213,13 @@ def run_recipe(
                 "components": components,
                 "transformer": transformer,
             })
+
+        elif step_name == "drop_columns":
+            valid = [c for c in columns if c in X_train.columns]
+            if valid:
+                X_train = X_train.drop(columns=valid)
+                X_test = X_test.drop(columns=valid)
+                fitted_transformers.append({"step": "drop_columns", "columns": valid, "transformer": None})
 
         else:
             raise ValueError(f"Unknown or unsupported preprocessing step: '{step_name}'")

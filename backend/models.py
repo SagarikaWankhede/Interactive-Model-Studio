@@ -60,9 +60,14 @@ class RunDB(Base):
     metrics_json = Column(JSON, nullable=False)
     confusion_matrix_json = Column(JSON, nullable=True)
     feature_importances_json = Column(JSON, nullable=True)
+    recipe_json = Column(JSON, nullable=True)
+    model_config_json = Column(JSON, nullable=True)
     model_artifact_path = Column(String(512), nullable=True)
     onnx_model_path = Column(String(512), nullable=True)
     is_reproducible = Column(Boolean, default=True)
+    graph_json = Column(JSON, nullable=True)        # visual node graph that produced this run
+    generated_code = Column(Text, nullable=True)    # Python script generated from that graph
+    parent_run_id = Column(Integer, nullable=True)  # set when produced by active-learning retraining
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
 
     user = relationship("UserDB", back_populates="runs")
@@ -79,3 +84,52 @@ class RunDB(Base):
     def feature_importances(self):
         return self.feature_importances_json
 
+    @property
+    def train_time(self):
+        return self.train_time_sec
+
+    @property
+    def model_name(self):
+        return self.algorithm
+
+    @property
+    def model_type(self):
+        return self.algorithm
+
+    @property
+    def status(self):
+        return "completed"
+
+    @property
+    def recipe(self):
+        return self.recipe_json or []
+
+    @property
+    def model_config(self):
+        return self.model_config_json or {}
+
+    @property
+    def hyperparams(self):
+        if self.model_config_json and "hyperparameters" in self.model_config_json:
+            return self.model_config_json["hyperparameters"]
+        return {}
+
+
+class EdgeCaseDB(Base):
+    """A low-confidence prediction waiting for a human label (active learning queue)."""
+    __tablename__ = "edge_cases"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    run_id = Column(Integer, ForeignKey("runs.id"), nullable=False, index=True)
+    source = Column(String(32), nullable=False, default="browser")  # browser | scan | api
+    row_index = Column(Integer, nullable=True)       # dataset row, when found by a dataset scan
+    features_json = Column(JSON, nullable=False)     # raw input features
+    predicted_label = Column(String(255), nullable=True)
+    confidence = Column(Float, nullable=True)
+    probabilities_json = Column(JSON, nullable=True)  # {class_label: probability}
+    dataset_label = Column(String(255), nullable=True)  # label already in the dataset (scan only)
+    status = Column(String(32), nullable=False, default="pending")  # pending | labeled | dismissed | applied
+    corrected_label = Column(String(255), nullable=True)
+    retrain_run_id = Column(Integer, nullable=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    labeled_at = Column(DateTime, nullable=True)

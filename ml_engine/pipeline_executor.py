@@ -96,6 +96,7 @@ def execute_pipeline(
         y_train=y_train,
         model_name=algorithm,
         hyperparameters=hyperparameters,
+        task_type=task_type,
     )
 
     # Evaluate model
@@ -111,6 +112,9 @@ def execute_pipeline(
         "task_type": task_type,
         "algorithm": algorithm,
         "train_time_seconds": train_time,
+        "train_time_sec": train_time,  # key used by the backend
+        "target_column": target_column,
+        "hyperparameters": hyperparameters,
         "cached_preprocessing": cached_hit,
         "metrics": evaluation_results["metrics"],
         "confusion_matrix": evaluation_results.get("confusion_matrix"),
@@ -120,7 +124,9 @@ def execute_pipeline(
             "test_rows": len(X_test),
             "features_count": X_train.shape[1],
         },
-        "features": list(X_train.columns),
+        "features": [str(c) for c in X_train.columns],
+        "X_train_shape": X_train.shape,
+        "X_test_shape": X_test.shape,
         "recipe_applied": recipe,
         "model_config": model_config,
         "fitted_model": fitted_model,

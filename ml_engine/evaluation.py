@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics import (
     accuracy_score,
+    balanced_accuracy_score,
     precision_score,
     recall_score,
     f1_score,
@@ -88,11 +89,23 @@ def evaluate_classification(
         "matrix": cm.tolist(),
     }
 
+    def _r(v):
+        return round(float(v), 4)
+
     metrics = {
-        "accuracy": round(float(acc), 4),
-        "f1_score": round(float(f1), 4),
-        "precision": round(float(prec), 4),
-        "recall": round(float(rec), 4),
+        "accuracy": _r(acc),
+        "f1_score": _r(f1),
+        "precision": _r(prec),
+        "recall": _r(rec),
+        # Explicit macro / weighted variants used by the backend, dashboards and generated code.
+        # Macro averages treat every class equally, which exposes poor minority-class performance.
+        "balanced_accuracy": _r(balanced_accuracy_score(y_test, y_pred)),
+        "precision_macro": _r(precision_score(y_test, y_pred, average="macro", zero_division=0)),
+        "precision_weighted": _r(prec),
+        "recall_macro": _r(recall_score(y_test, y_pred, average="macro", zero_division=0)),
+        "recall_weighted": _r(rec),
+        "f1_macro": _r(f1_score(y_test, y_pred, average="macro", zero_division=0)),
+        "f1_weighted": _r(f1),
     }
     if roc_auc is not None:
         metrics["roc_auc"] = round(float(roc_auc), 4)

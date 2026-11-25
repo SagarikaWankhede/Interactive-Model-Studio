@@ -1,6 +1,6 @@
 import os
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Body
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from ..database import get_db
@@ -36,7 +36,8 @@ def execute_run(
             recipe=recipe_dicts,
             model_config=model_config_dict,
             db=db,
-            user_id=user_id
+            use_cache=payload.use_cache if payload.use_cache is not None else True,
+            user_id=user_id,
         )
         return run_record
     except Exception as e:
@@ -85,7 +86,10 @@ def list_edge_models(
 
 
 @router.get("/compare")
-def compare_runs(ids: str = Query(..., description="Comma-separated run IDs, e.g. '1,2,3'"), db: Session = Depends(get_db)):
+def compare_runs(
+    ids: str = Query(..., description="Comma-separated run IDs, e.g. '1,2,3'"),
+    db: Session = Depends(get_db)
+):
     """Side-by-side comparison table of metrics across multiple runs."""
     try:
         run_ids = [int(i.strip()) for i in ids.split(",") if i.strip().isdigit()]
@@ -100,9 +104,13 @@ def compare_runs(ids: str = Query(..., description="Comma-separated run IDs, e.g
     for r in runs:
         comparison_data.append({
             "run_id": r.id,
+            "id": r.id,
             "algorithm": r.algorithm,
+            "model_name": r.algorithm,
+            "model_type": r.algorithm,
             "task_type": r.task_type,
             "train_time_sec": r.train_time_sec,
+            "train_time": r.train_time_sec,
             "metrics": r.metrics_json,
             "is_reproducible": r.is_reproducible,
             "created_at": r.created_at.isoformat(),

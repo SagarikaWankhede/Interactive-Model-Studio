@@ -1,0 +1,31 @@
+services:
+  # FastAPI backend + ML engine
+  - type: web
+    name: model-studio-api
+    runtime: python
+    plan: free
+    buildCommand: pip install -r backend/requirements.txt -r ml_engine/requirements.txt
+    startCommand: uvicorn backend.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+
+  # React (Vite) frontend
+  - type: web
+    name: model-studio-web
+    runtime: static
+    rootDir: frontend
+    buildCommand: npm ci && npm run build
+    staticPublishPath: dist
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      - key: NODE_VERSION
+        value: 22.12.0
+      # Must be the PUBLIC URL: fromService/property:host gives the private-network
+      # hostname ("model-studio-api"), which browsers cannot resolve.
+      - key: VITE_API_BASE_URL
+        value: https://model-studio-api.onrender.com

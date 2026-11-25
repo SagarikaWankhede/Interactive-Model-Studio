@@ -12,9 +12,10 @@ from ml_engine.pipeline_executor import execute_pipeline
 
 def verify_reproducibility(
     df: pd.DataFrame,
-    config: Dict[str, Any],
-    original_metrics: Dict[str, float],
+    config: Optional[Dict[str, Any]] = None,
+    original_metrics: Optional[Dict[str, float]] = None,
     tolerance: float = 1e-4,
+    original_config: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Re-runs an experiment from raw configuration and verifies output reproducibility.
@@ -28,6 +29,11 @@ def verify_reproducibility(
     Returns:
         Dictionary detailing reproducibility status, metric differences, and evaluation output.
     """
+    config = config or original_config  # `original_config` is the backend's keyword name
+    if not config:
+        raise ValueError("A pipeline configuration must be provided.")
+    original_metrics = original_metrics or {}
+
     # Force uncached execution to test true reproducibility
     reproduced_result = execute_pipeline(df=df, config=config, use_cache=False)
     new_metrics = reproduced_result.get("metrics", {})
@@ -75,5 +81,8 @@ def verify_reproducibility(
         "message": message,
         "tolerance": tolerance,
         "metrics_comparison": discrepancies,
-        "reproduced_result": reproduced_result,
+        # Fitted estimators/transformers are dropped so the result stays JSON-serializable.
+        "reproduced_result": {
+            k: v for k, v in reproduced_result.items() if k not in ("fitted_model", "fitted_transformers")
+        },
     }

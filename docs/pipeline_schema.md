@@ -169,6 +169,15 @@ Decomposes date/time columns into integer components and drops raw strings.
   * `columns` (*list[str]*): Datetime columns to decompose.
   * `components` (*list[str]*): List containing `"year"`, `"month"`, `"day"`, `"dayofweek"`, `"is_weekend"`.
 
+### 2.11 `drop_columns` (Remove Columns)
+Removes ID, leaky or useless columns from both partitions.
+* **Parameters:**
+  * `columns` (*list[str]*): Columns to remove (may also be given at the step's top level).
+
+> **Execution order:** wherever `split` appears in the list, the split is performed first and every
+> other step is fitted on the training partition only, then applied to the test partition.
+> The Visual Studio code generator mirrors this exactly.
+
 ---
 
 ## 3. Model Configuration Specification (`model_config`)

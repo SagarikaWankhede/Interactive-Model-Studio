@@ -176,20 +176,26 @@ def apply_power_transform(
 
     if method == "log1p":
         # log(1 + x) for non-negative values
+        shifts = {}
         for c in valid_cols:
             min_val = min(X_train[c].min(), X_test[c].min())
             shift = abs(min_val) if min_val < 0 else 0
+            shifts[c] = float(shift)
             X_train_transformed[c] = np.log1p(np.maximum(0, X_train[c] + shift))
             X_test_transformed[c] = np.log1p(np.maximum(0, X_test[c] + shift))
-        return X_train_transformed, X_test_transformed, {"method": "log1p"}
+        # Shifts are recorded so the same transform can be replayed on new rows.
+        return X_train_transformed, X_test_transformed, {"method": "log1p", "shifts": shifts}
 
     elif method == "sqrt":
+        shifts = {}
         for c in valid_cols:
             min_val = min(X_train[c].min(), X_test[c].min())
             shift = abs(min_val) if min_val < 0 else 0
+            shifts[c] = float(shift)
             X_train_transformed[c] = np.sqrt(np.maximum(0, X_train[c] + shift))
             X_test_transformed[c] = np.sqrt(np.maximum(0, X_test[c] + shift))
-        return X_train_transformed, X_test_transformed, {"method": "sqrt"}
+        # Shifts are recorded so the same transform can be replayed on new rows.
+        return X_train_transformed, X_test_transformed, {"method": "sqrt", "shifts": shifts}
 
     else:
         # yeo-johnson or box-cox via PowerTransformer
@@ -373,3 +379,81 @@ def apply_datetime_decomposition(
         X_test_transformed = X_test_transformed.drop(columns=[col])
 
     return X_train_transformed, X_test_transformed, {"components": components}
+
+
+# ---------------------------------------------------------------------------
+# Replaying a fitted recipe on new raw rows
+# Used for inference outside training: dataset uncertainty scans, ONNX parity
+# checks and the browser-export spec. Mirrors exactly what run_recipe did to
+# the test partition.
+# ---------------------------------------------------------------------------
+
+def transform_with_entry(df: pd.DataFrame, entry: Dict[str, Any]) -> pd.DataFrame:
+    """Applies one fitted recipe entry (as returned by run_recipe) to new data."""
+    step = entry.get("step")
+    cols = [c for c in entry.get("columns", []) if c in df.columns]
+    if not cols:
+        return df
+    out = df.copy()
+    t = entry.get("transformer")
+
+    if step == "drop_columns":
+        return out.drop(columns=cols)
+    if step == "outlier_clip":
+        for c, (lo, hi) in (entry.get("thresholds") or {}).items():
+            if c in out.columns:
+                out[c] = out[c].clip(lower=lo, upper=hi)
+        return out
+    if step == "datetime":
+        components = entry.get("components") or ()
+        for c in cols:
+            dt = pd.to_datetime(out[c], errors="coerce")
+            for comp in ("year", "month", "day", "dayofweek"):
+                if comp in components:
+                    out[f"{c}_{comp}"] = getattr(dt.dt, comp).fillna(-1).astype(int)
+            if "is_weekend" in components:
+                out[f"{c}_is_weekend"] = (dt.dt.dayofweek >= 5).astype(int)
+            out = out.drop(columns=[c])
+        return out
+    if t is None:
+        return out
+
+    if step == "power_transform" and isinstance(t, dict):
+        fn = np.log1p if t.get("method") == "log1p" else np.sqrt
+        for c in cols:
+            out[c] = fn(np.maximum(0, out[c] + t.get("shifts", {}).get(c, 0.0)))
+        return out
+    if step in ("impute", "scale", "power_transform", "bin"):
+        cols = [c for c in getattr(t, "feature_names_in_", cols) if c in out.columns]
+        out[cols] = t.transform(out[cols])
+        return out
+    if step == "encode":
+        cols = [c for c in getattr(t, "feature_names_in_", cols) if c in out.columns]
+        values = out[cols].astype(str)  # run_recipe encodes string-cast values
+        if type(t).__name__ == "OneHotEncoder":
+            encoded = pd.DataFrame(t.transform(values), columns=t.get_feature_names_out(cols), index=out.index)
+            return pd.concat([out.drop(columns=cols), encoded], axis=1)
+        out[cols] = t.transform(values)
+        return out
+    if step in ("polynomial", "pca"):
+        cols = [c for c in getattr(t, "feature_names_in_", cols) if c in out.columns]
+        arr = t.transform(out[cols])
+        names = t.get_feature_names_out(cols) if step == "polynomial" else [f"pca_{i + 1}" for i in range(arr.shape[1])]
+        return pd.concat([out.drop(columns=cols), pd.DataFrame(arr, columns=names, index=out.index)], axis=1)
+    raise ValueError(f"Cannot replay recipe step '{step}'.")
+
+
+def apply_fitted_transformers(
+    df: pd.DataFrame,
+    fitted_transformers: List[Dict[str, Any]],
+    feature_order: Optional[List[str]] = None,
+) -> pd.DataFrame:
+    """Replays a fitted recipe on raw rows, optionally aligning to the model's feature order."""
+    out = df.copy()
+    for entry in fitted_transformers or []:
+        if isinstance(entry, dict):
+            out = transform_with_entry(out, entry)
+    out.columns = [str(c) for c in out.columns]
+    if feature_order:
+        out = out.reindex(columns=feature_order, fill_value=0)
+    return out
