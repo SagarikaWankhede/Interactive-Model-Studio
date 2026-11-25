@@ -3,14 +3,14 @@
  * Connects frontend UI to backend core services.
  */
 
-// If running in development on Vite port 5173, point to local backend on 8000.
-// When deployed on Render (single origin) or VITE_API_BASE_URL is specified, use that.
-const isDev = typeof window !== "undefined" && window.location.port === "5173";
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL !== undefined
-  ? import.meta.env.VITE_API_BASE_URL
-  : isDev
-  ? "http://127.0.0.1:8000"
-  : "";
+// Determine backend API URL:
+// 1. Explicit environment variable (set in Render dashboard)
+// 2. If running on Render (*.onrender.com), connect directly to the deployed backend API: https://model-studio-api.onrender.com
+// 3. Otherwise (local development), default to http://127.0.0.1:8000
+const isRenderDeployment = typeof window !== "undefined" && window.location.hostname.includes("onrender.com");
+const API_BASE_URL = 
+  import.meta.env.VITE_API_BASE_URL ||
+  (isRenderDeployment ? "https://model-studio-api.onrender.com" : "http://127.0.0.1:8000");
 
 /**
  * Core request helper with auth header injection, error handling, and response normalization.
