@@ -34,6 +34,7 @@ class PredictRequest(BaseModel):
 
 class DatasetResponse(BaseModel):
     id: int
+    user_id: Optional[int] = None
     filename: str
     row_count: int
     col_count: int
@@ -47,6 +48,7 @@ class DatasetResponse(BaseModel):
 
 class RunResponse(BaseModel):
     id: int
+    user_id: Optional[int] = None
     dataset_id: int
     task_type: str
     algorithm: str
@@ -54,8 +56,39 @@ class RunResponse(BaseModel):
     metrics: Dict[str, Any]
     confusion_matrix: Optional[Dict[str, Any]] = None
     feature_importances: Optional[List[Dict[str, Any]]] = None
+    onnx_model_path: Optional[str] = None
     is_reproducible: bool
     created_at: datetime.datetime
 
     class Config:
         from_attributes = True
+
+
+class UserRegister(BaseModel):
+    username: str
+    email: str
+    password: str
+    full_name: Optional[str] = None
+
+
+class UserLogin(BaseModel):
+    username: str  # username or email
+    password: str
+
+
+class UserResponse(BaseModel):
+    id: int
+    username: str
+    email: str
+    full_name: Optional[str] = None
+    created_at: datetime.datetime
+
+    class Config:
+        from_attributes = True
+
+
+class AuthResponse(BaseModel):
+    token: str
+    user: UserResponse
+    message: str = "Authenticated successfully"
+

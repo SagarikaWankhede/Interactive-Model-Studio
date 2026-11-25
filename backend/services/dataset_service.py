@@ -1,7 +1,7 @@
 import os
 import uuid
 import pandas as pd
-from typing import Tuple, Dict, Any
+from typing import Tuple, Dict, Any, Optional
 from sqlalchemy.orm import Session
 from ..models import DatasetDB
 
@@ -9,8 +9,13 @@ STORAGE_DATASETS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.absp
 os.makedirs(STORAGE_DATASETS_DIR, exist_ok=True)
 
 
-def process_and_save_dataset(file_name: str, file_bytes: bytes, db: Session) -> DatasetDB:
-    """Saves file to disk, computes schema statistics, and stores record in DB."""
+def process_and_save_dataset(
+    file_name: str, 
+    file_bytes: bytes, 
+    db: Session, 
+    user_id: Optional[int] = None
+) -> DatasetDB:
+    """Saves file to disk, computes schema statistics, and stores record in DB with optional user association."""
     file_ext = os.path.splitext(file_name)[1].lower()
     unique_filename = f"{uuid.uuid4().hex}_{file_name}"
     file_path = os.path.join(STORAGE_DATASETS_DIR, unique_filename)
@@ -20,6 +25,10 @@ def process_and_save_dataset(file_name: str, file_bytes: bytes, db: Session) -> 
 
     if file_ext == ".parquet":
         df = pd.read_parquet(file_path)
+    elif file_ext == ".json":
+        df = pd.read_json(file_path)
+    elif file_ext == ".tsv":
+        df = pd.read_csv(file_path, sep="\t")
     else:
         df = pd.read_csv(file_path)
 
@@ -28,6 +37,7 @@ def process_and_save_dataset(file_name: str, file_bytes: bytes, db: Session) -> 
     missing_counts = {col: int(count) for col, count in df.isnull().sum().items()}
 
     dataset_record = DatasetDB(
+        user_id=user_id,
         filename=file_name,
         file_path=file_path,
         row_count=row_count,
@@ -55,4 +65,8 @@ def load_dataset_dataframe(dataset_id: int, db: Session) -> pd.DataFrame:
 
     if file_path.endswith(".parquet"):
         return pd.read_parquet(file_path)
+    elif file_path.endswith(".json"):
+        return pd.read_json(file_path)
+    elif file_path.endswith(".tsv"):
+        return pd.read_csv(file_path, sep="\t")
     return pd.read_csv(file_path)
