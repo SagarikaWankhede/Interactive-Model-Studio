@@ -3,12 +3,20 @@
  * Connects frontend UI to backend core services.
  */
 
-const RAW_API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
+// Determine backend API URL:
+// 1. Explicit environment variable (set in Render dashboard)
+// 2. If running on Render (*.onrender.com), connect directly to the deployed backend API: https://model-studio-api.onrender.com
+// 3. Otherwise (local development), default to http://127.0.0.1:8000
+const isRenderDeployment = typeof window !== "undefined" && window.location.hostname.includes("onrender.com");
+const RAW_API_BASE_URL =
+  import.meta.env.VITE_API_BASE_URL ||
+  (isRenderDeployment ? "https://model-studio-api.onrender.com" : "http://127.0.0.1:8000");
+
 // Accept a bare host (e.g. "my-api.onrender.com") as well as a full URL.
 const API_BASE_URL = (/^https?:\/\//.test(RAW_API_BASE_URL) ? RAW_API_BASE_URL : `https://${RAW_API_BASE_URL}`).replace(/\/+$/, "");
 
 /**
- * Core request helper with error handling and response normalization.
+ * Core request helper with auth header injection, error handling, and response normalization.
  */
 async function request(endpoint, options = {}) {
   const url = `${API_BASE_URL}${endpoint.startsWith("/") ? endpoint : `/${endpoint}`}`;
@@ -17,6 +25,12 @@ async function request(endpoint, options = {}) {
   // Set Content-Type only if not sending FormData
   if (!(options.body instanceof FormData) && !headers["Content-Type"]) {
     headers["Content-Type"] = "application/json";
+  }
+
+  // Inject Authorization Bearer token if user is signed in
+  const token = typeof localStorage !== "undefined" ? localStorage.getItem("ims_token") : null;
+  if (token && !headers["Authorization"]) {
+    headers["Authorization"] = `Bearer ${token}`;
   }
 
   try {
@@ -54,41 +68,82 @@ async function request(endpoint, options = {}) {
 }
 
 export const api = {
-  // Phase 0: System Health
-  healthCheck: () => request("/"),
+  // Base URL helper
+  getBaseUrl: () => API_BASE_URL,
 
-  // Phase 1: Data Layer
+  // System Health
+  healthCheck: () => request("/api/health").catch(() => request("/health")),
+
+  // User Authentication
+  login: (credentials) =>
+    request("/api/auth/login", {
+      method: "POST",
+      body: JSON.stringify(credentials),
+    }),
+  register: (userData) =>
+    request("/api/auth/register", {
+      method: "POST",
+      body: JSON.stringify(userData),
+    }),
+  getMe: () => request("/api/auth/me"),
+
+  // Data Layer (Supports CSV, TSV, Parquet, JSON)
   uploadDataset: (file) => {
     const formData = new FormData();
     formData.append("file", file);
-    return request("/upload", {
+    return request("/api/datasets/upload", {
       method: "POST",
       body: formData,
     });
   },
-  getDatasets: () => request("/dataset"),
+  getDatasets: () => request("/api/datasets"),
+  getDataset: (datasetId) => request(`/api/datasets/${datasetId}`),
+  getDatasetPreview: (datasetId, limit = 10) =>
+    request(`/api/datasets/${datasetId}/preview?limit=${limit}`),
   getDiagnostics: (datasetId) => request(`/diagnostics?dataset_id=${datasetId}`),
 
-  // Phase 2: Experiment Engine
-  runExperiment: (payload) =>
-    request("/experiment/run", {
+  // Pipeline Preview
+  previewRecipe: (payload) =>
+    request("/api/pipelines/preview", {
       method: "POST",
       body: JSON.stringify(payload),
     }),
-  getExperiments: () => request("/experiment/list"),
-  getExperimentDetail: (experimentId) => request(`/experiment/${experimentId}`),
 
-  // Phase 3: Visual Dashboard
-  compareExperiments: (experimentIds) =>
-    request("/compare", {
+  // Experiment & Run Engine
+  runExperiment: (payload) =>
+    request("/api/runs/execute", {
       method: "POST",
-      body: JSON.stringify({ experiment_ids: experimentIds }),
+      body: JSON.stringify(payload),
     }),
-  restoreExperiment: (experimentId) => request(`/restore/${experimentId}`),
+  getExperiments: () => request("/api/runs"),
+  getExperimentDetail: (experimentId) => request(`/api/runs/${experimentId}`),
+  compareExperiments: (experimentIds) => {
+    const idsStr = Array.isArray(experimentIds) ? experimentIds.join(",") : experimentIds;
+    return request(`/api/runs/compare?ids=${encodeURIComponent(idsStr)}`);
+  },
+  restoreExperiment: (experimentId) =>
+    request(`/api/runs/${experimentId}/verify-reproducibility`, {
+      method: "POST",
+    }),
 
-  // Phase 4: Model Export
-  exportONNX: (experimentId) => request(`/export/${experimentId}`),
+  // Phase 4 & Edge: Model Export & Code
+  exportONNX: (experimentId) =>
+    request(`/api/runs/${experimentId}/export-onnx`, { method: "POST" }).catch(() => request(`/export/${experimentId}`, { method: "POST" })),
   exportCode: (experimentId) => request(`/export/${experimentId}`),
+  exportStandaloneCode: (experimentId) => request(`/export/${experimentId}`),
+
+  // Edge Lab & In-Browser Inference
+  getEdgeModels: () => request("/api/runs/edge/models"),
+  benchmarkEdge: (experimentId, iterations = 100) =>
+    request(`/api/runs/${experimentId}/edge-benchmark?iterations=${iterations}`, {
+      method: "POST",
+    }),
+  predictSample: (runId, features) =>
+    request(`/api/runs/${runId}/predict`, {
+      method: "POST",
+      body: JSON.stringify({ features }),
+    }),
+  getOnnxDownloadUrl: (runId) => `${API_BASE_URL}/api/runs/${runId}/download-onnx`,
 
   // Visual pipeline editor (node graph -> code -> training)
   compileGraph: (graph) => request("/api/graph/compile", { method: "POST", body: JSON.stringify(graph) }),

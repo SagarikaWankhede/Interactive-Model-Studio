@@ -2,7 +2,7 @@ from typing import List, Dict, Any, Optional
 from fastapi import APIRouter, Depends, UploadFile, File, HTTPException
 from sqlalchemy.orm import Session
 from ..database import get_db
-from ..models import DatasetDB
+from ..models import DatasetDB, UserDB
 from ..schemas import DatasetResponse
 from ..services.dataset_service import (
     process_and_save_dataset,
@@ -10,14 +10,18 @@ from ..services.dataset_service import (
     get_dataset_schema,
     compute_dataset_diagnostics,
 )
+from .auth import get_current_user_optional
 
 router = APIRouter(prefix="/api/datasets", tags=["Datasets"])
+
+SUPPORTED_EXTENSIONS = (".csv", ".tsv", ".parquet", ".json")
 
 
 def _enrich_dataset_record(record: DatasetDB, db: Session) -> Dict[str, Any]:
     """Enriches dataset record with schema, diagnostics, and frontend-friendly keys."""
     data = {
         "id": record.id,
+        "user_id": record.user_id,
         "filename": record.filename,
         "name": record.filename,
         "row_count": record.row_count,
@@ -42,23 +46,40 @@ def _enrich_dataset_record(record: DatasetDB, db: Session) -> Dict[str, Any]:
 
 
 @router.post("/upload", response_model=DatasetResponse)
-async def upload_dataset(file: UploadFile = File(...), db: Session = Depends(get_db)):
-    """Upload a CSV or Parquet dataset file and compute schema summary metadata."""
-    if not (file.filename.endswith(".csv") or file.filename.endswith(".parquet")):
-        raise HTTPException(status_code=400, detail="Only CSV and Parquet files are supported.")
+async def upload_dataset(
+    file: UploadFile = File(...), 
+    db: Session = Depends(get_db),
+    current_user: Optional[UserDB] = Depends(get_current_user_optional)
+):
+    """Upload a CSV, TSV, Parquet, or JSON dataset file and compute schema summary metadata."""
+    filename_lower = file.filename.lower()
+    if not any(filename_lower.endswith(ext) for ext in SUPPORTED_EXTENSIONS):
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Unsupported file format. Supported formats: {', '.join(SUPPORTED_EXTENSIONS)}"
+        )
 
     content = await file.read()
     try:
-        record = process_and_save_dataset(file.filename, content, db)
+        user_id = current_user.id if current_user else None
+        record = process_and_save_dataset(file.filename, content, db, user_id=user_id)
         return _enrich_dataset_record(record, db)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to process dataset file: {str(e)}")
 
 
 @router.get("", response_model=List[DatasetResponse])
-def list_datasets(db: Session = Depends(get_db)):
-    """List all uploaded datasets with schema and diagnostics."""
-    records = db.query(DatasetDB).order_by(DatasetDB.created_at.desc()).all()
+def list_datasets(
+    db: Session = Depends(get_db),
+    current_user: Optional[UserDB] = Depends(get_current_user_optional)
+):
+    """List uploaded datasets with schema and diagnostics. When authenticated, filters to user datasets + sample datasets."""
+    if current_user:
+        records = db.query(DatasetDB).filter(
+            (DatasetDB.user_id == current_user.id) | (DatasetDB.user_id.is_(None))
+        ).order_by(DatasetDB.created_at.desc()).all()
+    else:
+        records = db.query(DatasetDB).order_by(DatasetDB.created_at.desc()).all()
     return [_enrich_dataset_record(r, db) for r in records]
 
 
@@ -94,3 +115,4 @@ def get_diagnostics(dataset_id: int, db: Session = Depends(get_db)):
         return {"diagnostics": diagnostics}
     except Exception as e:
         raise HTTPException(status_code=404, detail=str(e))
+

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { NavLink } from "react-router-dom";
+import { NavLink, Link } from "react-router-dom";
 import { 
   Database, 
   Sliders,
@@ -11,13 +11,19 @@ import {
   AlertCircle, 
   Loader2,
   Sparkles,
+  Zap,
+  LogIn,
+  LogOut,
+  User,
   Network,
   Stethoscope,
   Rocket
 } from "lucide-react";
 import api from "../api/client";
+import { useAuth } from "../context/AuthContext";
 
 export default function Navbar() {
+  const { user, isAuthenticated, logout } = useAuth();
   const [status, setStatus] = useState("checking"); // 'checking' | 'connected' | 'error'
   const [backendMessage, setBackendMessage] = useState("");
 
@@ -43,7 +49,7 @@ export default function Navbar() {
   return (
     <header className="navbar">
       <div className="nav-container">
-        <div className="brand-section">
+        <Link to="/upload" className="brand-section" style={{ textDecoration: "none" }}>
           <div className="brand-icon">
             <Sparkles className="icon-pulse" size={20} />
           </div>
@@ -51,7 +57,7 @@ export default function Navbar() {
             <span className="brand-title">Interactive Model Studio</span>
             <span className="brand-tagline">Visual ML & Codegen Platform</span>
           </div>
-        </div>
+        </Link>
 
         <nav className="nav-links">
           <NavLink
@@ -67,13 +73,6 @@ export default function Navbar() {
           >
             <Stethoscope size={15} />
             <span>Data Doctor</span>
-          </NavLink>
-          <NavLink
-            to="/edge"
-            className={({ isActive }) => `nav-link ${isActive ? "active" : ""}`}
-          >
-            <Rocket size={15} />
-            <span>Edge Lab</span>
           </NavLink>
           <NavLink 
             to="/upload" 
@@ -94,14 +93,7 @@ export default function Navbar() {
             className={({ isActive }) => `nav-link ${isActive ? "active" : ""}`}
           >
             <Cpu size={15} />
-            <span>Model Config</span>
-          </NavLink>
-          <NavLink 
-            to="/experiments" 
-            className={({ isActive }) => `nav-link ${isActive ? "active" : ""}`}
-          >
-            <History size={15} />
-            <span>Experiments</span>
+            <span>Models</span>
           </NavLink>
           <NavLink 
             to="/pipeline" 
@@ -111,27 +103,96 @@ export default function Navbar() {
             <span>Pipeline</span>
           </NavLink>
           <NavLink 
+            to="/experiments" 
+            className={({ isActive }) => `nav-link ${isActive ? "active" : ""}`}
+          >
+            <History size={15} />
+            <span>Experiments</span>
+          </NavLink>
+          <NavLink 
             to="/dashboard" 
             className={({ isActive }) => `nav-link ${isActive ? "active" : ""}`}
           >
             <BarChart3 size={15} />
             <span>Dashboard</span>
           </NavLink>
+          <NavLink 
+            to="/edge-lab" 
+            className={({ isActive }) => `nav-link ${isActive ? "active" : ""}`}
+            style={{ position: "relative" }}
+          >
+            <Rocket size={15} color="#10b981" />
+            <span style={{ fontWeight: 600 }}>Edge Lab</span>
+            <span style={{ 
+              position: "absolute", 
+              top: "-4px", 
+              right: "-6px", 
+              background: "#10b981", 
+              color: "#fff", 
+              fontSize: "0.6rem", 
+              padding: "1px 4px", 
+              borderRadius: "4px",
+              fontWeight: 700 
+            }}>
+              ONNX
+            </span>
+          </NavLink>
         </nav>
 
-        <div className="status-section">
+        <div className="status-section" style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+          {/* Health status pill */}
           <div 
             className={`status-pill ${status}`} 
-            title={`Backend: ${backendMessage} (${import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000"})`}
+            title={`Backend: ${backendMessage} (${api.getBaseUrl()})`}
             onClick={checkConnection}
+            style={{ cursor: "pointer" }}
           >
-            {status === "connected" && <CheckCircle2 size={14} className="text-success" />}
-            {status === "checking" && <Loader2 size={14} className="animate-spin text-warning" />}
-            {status === "error" && <AlertCircle size={14} className="text-danger" />}
-            <span>
-              {status === "connected" ? "Backend Live" : status === "checking" ? "Checking API..." : "Backend Offline"}
+            {status === "connected" && <CheckCircle2 size={13} className="text-success" />}
+            {status === "checking" && <Loader2 size={13} className="animate-spin text-warning" />}
+            {status === "error" && <AlertCircle size={13} className="text-danger" />}
+            <span style={{ fontSize: "0.75rem" }}>
+              {status === "connected" ? "Live" : status === "checking" ? "Checking..." : "Offline"}
             </span>
           </div>
+
+          {/* User Auth Section */}
+          {isAuthenticated ? (
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <div 
+                style={{ 
+                  display: "flex", 
+                  alignItems: "center", 
+                  gap: "6px", 
+                  background: "rgba(99, 102, 241, 0.15)", 
+                  padding: "5px 10px", 
+                  borderRadius: "20px",
+                  fontSize: "0.8rem",
+                  color: "var(--accent-primary)",
+                  fontWeight: 500
+                }}
+              >
+                <User size={13} />
+                <span>{user?.username}</span>
+              </div>
+              <button 
+                onClick={logout} 
+                className="btn btn-secondary btn-sm" 
+                title="Sign Out"
+                style={{ padding: "5px 8px" }}
+              >
+                <LogOut size={13} />
+              </button>
+            </div>
+          ) : (
+            <Link 
+              to="/login" 
+              className="btn btn-primary btn-sm" 
+              style={{ fontSize: "0.8rem", padding: "6px 12px", textDecoration: "none", gap: "5px" }}
+            >
+              <LogIn size={13} />
+              <span>Sign In</span>
+            </Link>
+          )}
         </div>
       </div>
     </header>

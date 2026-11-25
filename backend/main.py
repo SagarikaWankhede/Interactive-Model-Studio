@@ -1,10 +1,13 @@
 import os
 import sys
 import json
-import pandas as pd
 from typing import List, Dict, Any, Optional
-from fastapi import FastAPI, UploadFile, File, Depends, HTTPException, Query, Body, Request
+
+import pandas as pd
+from fastapi import FastAPI, Depends, UploadFile, File, HTTPException, Query, Body, Request, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 # Ensure root is in path
@@ -13,22 +16,33 @@ if ROOT_DIR not in sys.path:
     sys.path.insert(0, ROOT_DIR)
 
 from .database import init_db, get_db
-from .models import RunDB, DatasetDB
-from .routers import datasets, pipelines, runs, predict, studio
+from .models import DatasetDB, RunDB, UserDB
+from .routers import datasets, pipelines, runs, predict, auth, studio
+from .routers.auth import get_current_user_optional
 from .routers.datasets import _enrich_dataset_record
-from .services.dataset_service import process_and_save_dataset, load_dataset_dataframe, compute_dataset_diagnostics
-from .services.ml_service import execute_pipeline_run, get_available_algorithms
+from .services.dataset_service import (
+    process_and_save_dataset,
+    load_dataset_dataframe,
+    compute_dataset_diagnostics
+)
+from .services.ml_service import (
+    execute_pipeline_run, 
+    verify_run_reproducibility,
+    export_run_onnx,
+    benchmark_run_edge,
+    get_available_algorithms,
+)
 
 # Initialize DB tables and run column migrations
 init_db()
 
 app = FastAPI(
     title="Interactive Model Studio API",
-    description="Backend API for visual machine learning platform and model orchestration",
+    description="Backend API and web host for visual machine learning platform and model orchestration",
     version="1.0.0"
 )
 
-# Configure CORS for Frontend (Person C)
+# Configure CORS to permit localhost and any deployed domain
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -44,7 +58,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Register Core API Routers
+# Register Core API Routers under /api
+app.include_router(auth.router)
 app.include_router(datasets.router)
 app.include_router(pipelines.router)
 app.include_router(runs.router)
@@ -52,20 +67,12 @@ app.include_router(predict.router)
 app.include_router(studio.router)
 
 
-@app.get("/")
-def home():
-    return {
-        "message": "Interactive Model Studio backend is running!",
-        "version": "1.0.0",
-        "status": "healthy"
-    }
-
-
 @app.get("/health")
 @app.get("/api/health")
 def health_check():
     return {
-        "status": "healthy"
+        "status": "healthy",
+        "message": "Interactive Model Studio backend is live!"
     }
 
 
@@ -74,22 +81,38 @@ def health_check():
 # ============================================================================
 
 @app.post("/upload")
-async def upload_direct(file: UploadFile = File(...), db: Session = Depends(get_db)):
+async def upload_direct(
+    file: UploadFile = File(...), 
+    db: Session = Depends(get_db),
+    current_user: Optional[UserDB] = Depends(get_current_user_optional)
+):
     """Frontend-compatible alias for dataset upload."""
-    if not (file.filename.endswith(".csv") or file.filename.endswith(".parquet")):
-        raise HTTPException(status_code=400, detail="Only CSV and Parquet files are supported.")
+    if not (
+        file.filename.endswith(".csv")
+        or file.filename.endswith(".parquet")
+        or file.filename.endswith(".json")
+        or file.filename.endswith(".tsv")
+    ):
+        raise HTTPException(status_code=400, detail="Supported formats: CSV, TSV, Parquet, JSON.")
     content = await file.read()
     try:
-        record = process_and_save_dataset(file.filename, content, db)
+        user_id = current_user.id if current_user else None
+        record = process_and_save_dataset(file.filename, content, db, user_id=user_id)
         return _enrich_dataset_record(record, db)
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
 
 @app.get("/dataset")
-def dataset_direct(db: Session = Depends(get_db)):
+def dataset_direct(
+    db: Session = Depends(get_db),
+    current_user: Optional[UserDB] = Depends(get_current_user_optional)
+):
     """Frontend-compatible alias for listing datasets."""
-    records = db.query(DatasetDB).order_by(DatasetDB.created_at.desc()).all()
+    query = db.query(DatasetDB)
+    if current_user:
+        query = query.filter((DatasetDB.user_id == current_user.id) | (DatasetDB.user_id.is_(None)))
+    records = query.order_by(DatasetDB.created_at.desc()).all()
     return [_enrich_dataset_record(r, db) for r in records]
 
 
@@ -107,7 +130,17 @@ def diagnostics_direct(dataset_id: Optional[str] = Query(None), db: Session = De
         df = load_dataset_dataframe(d_id, db)
         return compute_dataset_diagnostics(df)
     except Exception:
-        return []
+        dataset = db.query(DatasetDB).filter(DatasetDB.id == d_id).first()
+        if not dataset:
+            return []
+        return {
+            "dataset_id": dataset.id,
+            "filename": dataset.filename,
+            "row_count": dataset.row_count,
+            "col_count": dataset.col_count,
+            "missing_summary": dataset.missing_counts,
+            "dtypes": dataset.column_types,
+        }
 
 
 def _format_run_for_frontend(r: RunDB, db: Session) -> Dict[str, Any]:
@@ -150,7 +183,11 @@ def _format_run_for_frontend(r: RunDB, db: Session) -> Dict[str, Any]:
 
 
 @app.post("/experiment/run")
-def run_experiment_direct(payload: Dict[str, Any] = Body(...), db: Session = Depends(get_db)):
+def run_experiment_direct(
+    payload: Dict[str, Any] = Body(...),
+    db: Session = Depends(get_db),
+    current_user: Optional[UserDB] = Depends(get_current_user_optional)
+):
     """
     Frontend-compatible endpoint for running experiments.
     Accepts both { dataset_id, model_type, hyperparameters } and full ExecutionRequest.
@@ -163,7 +200,7 @@ def run_experiment_direct(payload: Dict[str, Any] = Body(...), db: Session = Dep
 
     # Load dataset to inspect target and columns
     df = load_dataset_dataframe(dataset_id, db)
-    
+
     # Resolve target column
     target_column = payload.get("target_column")
     if not target_column or target_column not in df.columns:
@@ -216,6 +253,7 @@ def run_experiment_direct(payload: Dict[str, Any] = Body(...), db: Session = Dep
     }
 
     try:
+        user_id = current_user.id if current_user else None
         run_record = execute_pipeline_run(
             dataset_id=dataset_id,
             task_type=task_type,
@@ -224,6 +262,7 @@ def run_experiment_direct(payload: Dict[str, Any] = Body(...), db: Session = Dep
             model_config=model_config,
             db=db,
             use_cache=True,
+            user_id=user_id,
         )
         return _format_run_for_frontend(run_record, db)
     except Exception as e:
@@ -231,9 +270,15 @@ def run_experiment_direct(payload: Dict[str, Any] = Body(...), db: Session = Dep
 
 
 @app.get("/experiment/list")
-def list_experiments_direct(db: Session = Depends(get_db)):
+def list_experiments_direct(
+    db: Session = Depends(get_db),
+    current_user: Optional[UserDB] = Depends(get_current_user_optional)
+):
     """Frontend-compatible alias for listing experiments."""
-    records = db.query(RunDB).order_by(RunDB.created_at.desc()).all()
+    query = db.query(RunDB)
+    if current_user:
+        query = query.filter((RunDB.user_id == current_user.id) | (RunDB.user_id.is_(None)))
+    records = query.order_by(RunDB.created_at.desc()).all()
     return [_format_run_for_frontend(r, db) for r in records]
 
 
@@ -327,3 +372,62 @@ print("Test Metrics:", result["metrics"])
         "algorithm": algo,
         "standalone_script": standalone_code
     }
+
+
+@app.post("/export/{experiment_id}")
+def compat_export_onnx(experiment_id: str, db: Session = Depends(get_db)):
+    """Compatibility endpoint for exporting model to ONNX format."""
+    try:
+        run_id = int(str(experiment_id).replace("exp-run-", ""))
+    except Exception:
+        run_id = 1
+    return runs.export_onnx_endpoint(run_id=run_id, db=db)
+
+
+# ---------------------------------------------------------------------------
+# Single-Link SPA Static Files Serving (Serves Built React Frontend)
+# ---------------------------------------------------------------------------
+
+FRONTEND_DIST = os.path.join(ROOT_DIR, "frontend", "dist")
+
+if os.path.exists(FRONTEND_DIST):
+    assets_dir = os.path.join(FRONTEND_DIST, "assets")
+    if os.path.exists(assets_dir):
+        app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
+
+    @app.get("/")
+    def serve_index():
+        return FileResponse(os.path.join(FRONTEND_DIST, "index.html"))
+
+    @app.get("/{full_path:path}")
+    async def serve_spa_fallback(full_path: str):
+        # Don't intercept API routes or Swagger docs
+        if (
+            full_path.startswith("api/") 
+            or full_path.startswith("docs") 
+            or full_path.startswith("redoc") 
+            or full_path == "openapi.json"
+        ):
+            raise HTTPException(status_code=404, detail="API route not found")
+
+        # If a specific static file was requested (e.g. vite.svg, favicon.ico)
+        static_file = os.path.join(FRONTEND_DIST, full_path)
+        if os.path.isfile(static_file):
+            return FileResponse(static_file)
+
+        # Client-side route fallback for React Router (e.g. /dataset/3, /edge-lab, /login)
+        index_file = os.path.join(FRONTEND_DIST, "index.html")
+        if os.path.isfile(index_file):
+            return FileResponse(index_file)
+
+        raise HTTPException(status_code=404, detail="Page not found")
+else:
+    @app.get("/")
+    def serve_api_welcome():
+        return {
+            "message": "Interactive Model Studio backend is running!",
+            "version": "1.0.0",
+            "status": "healthy",
+            "docs": "/docs",
+            "note": "Frontend dist build not found. Run 'npm run build' inside frontend/ to enable unified single-link hosting."
+        }

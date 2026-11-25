@@ -39,6 +39,7 @@ class DatasetResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
     id: int
+    user_id: Optional[int] = None
     filename: str
     name: Optional[str] = None
     row_count: int
@@ -56,6 +57,7 @@ class RunResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
     id: int
+    user_id: Optional[int] = None
     dataset_id: int
     task_type: str
     algorithm: str
@@ -67,10 +69,39 @@ class RunResponse(BaseModel):
     metrics: Dict[str, Any]
     confusion_matrix: Optional[Any] = None
     feature_importances: Optional[List[Dict[str, Any]]] = None
+    onnx_model_path: Optional[str] = None
     recipe: Optional[List[Dict[str, Any]]] = None
     model_settings: Optional[Dict[str, Any]] = Field(default=None, alias="model_config")
     is_reproducible: bool
     created_at: datetime.datetime
+
+
+class UserRegister(BaseModel):
+    username: str
+    email: str
+    password: str
+    full_name: Optional[str] = None
+
+
+class UserLogin(BaseModel):
+    username: str  # username or email
+    password: str
+
+
+class UserResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    username: str
+    email: str
+    full_name: Optional[str] = None
+    created_at: datetime.datetime
+
+
+class AuthResponse(BaseModel):
+    token: str
+    user: UserResponse
+    message: str = "Authenticated successfully"
 
 
 class ModelMetadataResponse(BaseModel):
