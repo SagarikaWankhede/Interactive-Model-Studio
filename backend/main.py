@@ -17,7 +17,7 @@ if ROOT_DIR not in sys.path:
 
 from .database import init_db, get_db
 from .models import DatasetDB, RunDB, UserDB
-from .routers import datasets, pipelines, runs, predict, auth, studio
+from .routers import datasets, pipelines, runs, predict, auth, studio, admin
 from .routers.auth import get_current_user_optional
 from .routers.datasets import _enrich_dataset_record
 from .services.dataset_service import (
@@ -65,6 +65,7 @@ app.include_router(pipelines.router)
 app.include_router(runs.router)
 app.include_router(predict.router)
 app.include_router(studio.router)
+app.include_router(admin.router)
 
 
 @app.get("/health")
