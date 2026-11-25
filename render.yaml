@@ -25,8 +25,7 @@ services:
     envVars:
       - key: NODE_VERSION
         value: 22.12.0
+      # Must be the PUBLIC URL: fromService/property:host gives the private-network
+      # hostname ("model-studio-api"), which browsers cannot resolve.
       - key: VITE_API_BASE_URL
-        fromService:
-          type: web
-          name: model-studio-api
-          property: host
+        value: https://model-studio-api.onrender.com
